@@ -235,7 +235,7 @@ class PlayerActivity : ComponentActivity() {
                     }
                 }
             })
-            setMediaItem(MediaItem.fromUri(playback.stream.url))
+            setMediaItem(MediaItem.Builder().setUri(playback.stream.url).setMimeType(playback.stream.mimeType).build())
             seekTo(resumePosition)
             armTimeout(generation)
             prepare(); playWhenReady = resumePlay

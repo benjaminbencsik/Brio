@@ -70,5 +70,5 @@ internal fun extractVixsrcPlaylist(html: String, userAgent: String, referer: Str
     val expires = field("expires") ?: return null
     val playlist = url.newBuilder().setQueryParameter("token", token).setQueryParameter("expires", expires)
         .setQueryParameter("h", "1").setQueryParameter("lang", "en").build()
-    return Stream(playlist.toString(), "Vixsrc", "Auto", mapOf("Referer" to referer, "User-Agent" to userAgent))
+    return Stream(playlist.toString(), "Vixsrc", "Auto", mapOf("Referer" to referer, "User-Agent" to userAgent), mimeType = "application/x-mpegURL")
 }

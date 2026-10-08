@@ -27,6 +27,7 @@ class BuiltinSourcesTest {
         assertEquals("a+b&c", url.queryParameter("token"))
         assertEquals("en", url.queryParameter("lang"))
         assertEquals("test-agent", stream.headers["User-Agent"])
+        assertEquals("application/x-mpegURL", stream.mimeType)
     }
     @Test fun rejectsPagesWithoutPlaylistAndUnsafeUrls() {
         assertNull(extractVixsrcPlaylist("<html>No video</html>", "agent", "https://provider.example/"))
