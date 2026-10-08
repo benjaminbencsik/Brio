@@ -1,0 +1,32 @@
+name: Check provider candidate
+on:
+  push:
+    paths:
+      - '.github/workflows/provider-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check manifest and direct stream results
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          base = "https://newman21-webstreamrmbg.hf.space"
+          def fetch(path):
+              req = urllib.request.Request(base + path, headers={"User-Agent": "Brio-provider-check/1.0"})
+              with urllib.request.urlopen(req, timeout=55) as response:
+                  data = response.read(1000000)
+                  return json.loads(data)
+          manifest = fetch("/manifest.json")
+          assert "stream" in manifest.get("resources", []), "No stream resource"
+          print("Manifest:", manifest.get("name"), manifest.get("version"))
+          result = fetch("/stream/movie/tt1254207.json")
+          streams = result.get("streams", [])
+          direct = [s for s in streams if s.get("url", "").startswith("https://")]
+          print("Open-movie test: direct HTTPS sources =", len(direct))
+          assert direct, "Provider returned no playable HTTPS sources for test title"
+          PY
