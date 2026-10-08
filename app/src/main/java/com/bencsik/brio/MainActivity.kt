@@ -48,10 +48,10 @@ import com.bencsik.brio.core.*
 import com.google.gson.Gson
 
 private val Lime = Color(0xFFB8F36A)
-private val Night = Color(0xFF0B101A)
-private val Slate = Color(0xFF192231)
+private val Night = Color(0xFF0D0D0F)
+private val Slate = Color(0xFF242426)
 private val Muted = Color(0xFF9BA8BA)
-private val Tabs = listOf("Discover", "Search", "Watchlist", "Continue", "Debrid", "Settings")
+private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
 class MainActivity : ComponentActivity() {
     private val vm: BrioViewModel by viewModels()
@@ -85,68 +85,81 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearShared: () -> Unit, play: (Playback) -> Unit, local: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableStateOf("Discover") }
+    var tab by rememberSaveable { mutableStateOf("Home") }
     var kind by rememberSaveable { mutableStateOf("movie") }
     var query by rememberSaveable { mutableStateOf("") }
     var showLink by rememberSaveable { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it); vm.dismissError() } }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
     LaunchedEffect(sharedLink) { if (sharedLink.isNotBlank()) showLink = true }
-    BackHandler(state.selected != null || tab != "Discover") { if (state.selected != null) vm.closeDetails() else { tab = "Discover"; vm.browse(kind) } }
     fun navigate(next: String) {
         vm.closeDetails(); tab = next
-        if (next == "Discover") vm.browse(kind)
-        if (next == "Search") vm.browse(kind, query)
-        if (next == "Debrid") vm.loadDebrid()
+        when (next) {
+            "Home", "Movies" -> { kind = "movie"; vm.browse(kind) }
+            "TV Shows" -> { kind = "tv"; vm.browse(kind) }
+            "Search" -> vm.browse(kind, query)
+            "Debrid" -> vm.loadDebrid()
+        }
     }
-    Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    BackHandler(state.selected != null || tab != "Home") {
+        if (state.selected != null) vm.closeDetails() else navigate("Home")
+    }
+    Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            if (!tv) NavigationBar(containerColor = Color(0xFF19191B)) {
+                Tabs.forEachIndexed { index, label ->
+                    NavigationBarItem(selected = tab == label, onClick = { navigate(label) },
+                        icon = { Text(listOf("⌂", "▶", "▣", "♡", "⚙")[index], style = MaterialTheme.typography.titleLarge) },
+                        label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelSmall) },
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Color.White, selectedTextColor = Color.White,
+                            indicatorColor = Color.Transparent, unselectedIconColor = Muted, unselectedTextColor = Muted))
+                }
+            }
+        }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
             val wide = maxWidth > 800.dp || tv
             Row(Modifier.fillMaxSize()) {
-                if (wide) Column(Modifier.width(176.dp).fillMaxHeight().background(Color(0xFF101723)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (tv) Column(Modifier.width(160.dp).fillMaxHeight().background(Slate).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Brand()
-                    Spacer(Modifier.height(24.dp))
-                    Tabs.forEach { item -> NavButton(item, tab == item) { navigate(item) } }
-                    Spacer(Modifier.weight(1f))
-                    Text("YOUR NEXT GREAT WATCH", style = MaterialTheme.typography.labelSmall, color = Muted)
-                    Text("Brio 0.1", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Tabs.forEach { label -> NavButton(label, tab == label) { navigate(label) } }
+                    NavButton("Search", tab == "Search") { navigate("Search") }
                 }
-                Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = if (wide) 30.dp else 16.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        if (!wide) Brand() else Text(if (state.selected != null) "Now exploring" else tab, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = { showLink = true }) { Text("Open link") }
-                            if (!tv) TextButton(onClick = local) { Text("Local file") }
-                        }
-                    }
-                    if (!wide) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 14.dp)) {
-                        items(Tabs) { item -> NavButton(item, tab == item) { navigate(item) } }
-                    }
-                    val selected = state.selected
-                    if (selected != null) DetailsScreen(state, vm, wide, play) { showLink = true }
-                    else when(tab) {
-                        "Settings" -> SettingsScreen(vm, state)
-                        "Debrid" -> DebridScreen(vm, state, play)
-                        "Continue" -> HistoryScreen(state, play, { vm.store.clearHistory(); vm.refreshLibrary() })
-                        "Watchlist" -> CatalogGrid(state.watchlist, wide, false, false, "Your watchlist is empty", "Save something you want to watch and find it here.", vm::select, {})
-                        else -> {
-                            if (tab == "Search") {
-                                OutlinedTextField(query, { query = it }, label = { Text("Search movies and shows") }, singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = { vm.browse(kind, query) }),
-                                    trailingIcon = { TextButton(onClick = { vm.browse(kind, query) }) { Text("Go") } })
-                                Spacer(Modifier.height(16.dp))
-                            } else {
-                                Hero(wide, vm.store.tmdbToken.isBlank()) { if (vm.store.tmdbToken.isBlank()) navigate("Settings") else showLink = true }
-                                Row(Modifier.padding(vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    NavButton("Movies", kind == "movie") { kind = "movie"; vm.browse(kind) }
-                                    NavButton("TV shows", kind == "tv") { kind = "tv"; vm.browse(kind) }
-                                }
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    Row(Modifier.fillMaxWidth().background(Color(0xFF151518)).padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Box {
+                            TextButton(onClick = { menu = true }) { Text("☰", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Continue watching") }, onClick = { menu = false; navigate("Continue") })
+                                DropdownMenuItem(text = { Text("Real-Debrid") }, onClick = { menu = false; navigate("Debrid") })
+                                DropdownMenuItem(text = { Text("Open link") }, onClick = { menu = false; showLink = true })
+                                if (!tv) DropdownMenuItem(text = { Text("Local file") }, onClick = { menu = false; local() })
                             }
-                            CatalogGrid(state.titles, wide, state.loading, state.canLoadMore,
-                                if (state.error == null) "Nothing found" else "Couldn't load the catalog",
-                                "Try another search or check your connection and Settings.", vm::select, { vm.browse(kind, if (tab == "Search") query else "", more = true) })
+                        }
+                        Brand()
+                        TextButton(onClick = { navigate("Search") }) { Text("Search", color = Color.White) }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when {
+                            state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, play) { showLink = true } }
+                            tab == "Home" -> HomeScreen(state, wide, vm::select, { vm.watch(it, play) }, play)
+                            tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state) }
+                            tab == "Debrid" -> Box(Modifier.padding(horizontal = 16.dp)) { DebridScreen(vm, state, play) }
+                            tab == "Continue" -> Box(Modifier.padding(horizontal = 16.dp)) { HistoryScreen(state, play, { vm.store.clearHistory(); vm.refreshLibrary() }) }
+                            tab == "My List" -> CatalogGrid(state.watchlist, wide, false, false, "Your list is empty", "Save a movie or show to see it here.", vm::select, {})
+                            else -> Column(Modifier.padding(horizontal = 16.dp)) {
+                                if (tab == "Search") {
+                                    OutlinedTextField(query, { query = it }, label = { Text("Search movies and shows") }, singleLine = true,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                        keyboardActions = KeyboardActions(onSearch = { vm.browse(kind, query) }),
+                                        trailingIcon = { TextButton(onClick = { vm.browse(kind, query) }) { Text("Go") } })
+                                } else Text(tab, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 16.dp))
+                                CatalogGrid(state.titles, wide, state.loading, state.canLoadMore, "Nothing found",
+                                    "Try another search or check Settings.", vm::select, { vm.browse(kind, if (tab == "Search") query else "", more = true) })
+                            }
                         }
                     }
                 }
@@ -154,6 +167,64 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         }
     }
     if (showLink) LinkDialog(sharedLink, vm, state.resolving, { showLink = false; clearShared() }, play)
+}
+
+@Composable private fun HomeScreen(state: UiState, wide: Boolean, info: (Title) -> Unit, watch: (Title) -> Unit, resume: (Playback) -> Unit) {
+    if (state.loading && state.titles.isEmpty()) { Busy(); return }
+    if (state.titles.isEmpty()) { EmptyState("Your next watch", "Connect your catalog in Settings to browse movies and shows."); return }
+    var featuredIndex by rememberSaveable { mutableIntStateOf(0) }
+    val featured = state.titles.take(6)
+    val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
+    LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        item {
+            Box(Modifier.fillMaxWidth().height(if (wide) 480.dp else 430.dp).background(Slate)) {
+                (title.backdrop ?: title.poster)?.let { AsyncImage(it, title.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xAA0D0D0F), Night))))
+                Column(Modifier.align(Alignment.BottomStart).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(title.name, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Text(listOf(title.year, if (title.rating > 0) "★ %.1f".format(title.rating) else "", if (title.kind == "tv") "TV Show" else "Movie").filter { it.isNotBlank() }.joinToString(" · "), color = Color(0xFFCCCCCC))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        featured.forEachIndexed { index, _ ->
+                            Box(Modifier.size(width = if (index == featuredIndex) 24.dp else 8.dp, height = 8.dp)
+                                .clip(RoundedCornerShape(8.dp)).background(if (index == featuredIndex) Color.White else Muted)
+                                .clickable { featuredIndex = index })
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { watch(title) }, enabled = !state.resolving,
+                            shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 28.dp, vertical = 16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play", fontWeight = FontWeight.Bold) }
+                        Button(onClick = { info(title) }, shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Slate, contentColor = Color.White)) { Text("ⓘ Info") }
+                    }
+                }
+            }
+        }
+        if (state.history.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Continue watching", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(state.history, key = { it.playback.key }) { history ->
+                            Column(Modifier.width(150.dp)) {
+                                Poster(history.playback.title) { resume(history.playback) }
+                                if (history.durationMs > 0) LinearProgressIndicator(progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item { PosterRow("Popular right now", state.titles, info) }
+        if (state.watchlist.isNotEmpty()) item { PosterRow("My List", state.watchlist, info) }
+    }
+}
+@Composable private fun PosterRow(label: String, titles: List<Title>, click: (Title) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(titles, key = { it.key }) { item -> Box(Modifier.width(150.dp)) { Poster(item) { click(item) } } }
+    }
 }
 
 @Composable private fun Brand() {
@@ -228,7 +299,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item { Text(item.overview.ifBlank { "No description available." }, color = Muted, style = MaterialTheme.typography.bodyLarge) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = vm::findSources, enabled = !state.resolving && (item.kind != "tv" || state.episode != null)) { Text(if (state.resolving) "Finding sources…" else "▶ Find streams") }
+                Button(onClick = { vm.findSources(play) }, enabled = !state.resolving && (item.kind != "tv" || state.episode != null), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play") }
+                if (state.streams.isNotEmpty()) TextButton(onClick = { vm.findSources() }) { Text("Servers") }
                 OutlinedButton(onClick = { vm.toggle(item) }) { Text(if (state.watchlist.any { it.key == item.key }) "✓ Saved" else "+ Watchlist") }
             }
         }

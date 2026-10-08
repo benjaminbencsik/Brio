@@ -76,7 +76,11 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun chooseEpisode(number: Int) { sourceJob?.cancel(); update { it.copy(episode = number, streams = emptyList(), resolving = false) } }
     fun toggle(item: Title) { store.toggle(item); refreshLibrary() }
-    fun findSources() {
+    fun watch(item: Title, callback: (Playback) -> Unit) {
+        select(item)
+        if (item.kind != "tv") findSources(callback)
+    }
+    fun findSources(onReady: ((Playback) -> Unit)? = null) {
         val snapshot = _state.value
         val item = snapshot.selected?.title ?: return
         sourceJob?.cancel()
@@ -91,6 +95,10 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
                 update { it.copy(streams = streams, resolving = false) }
+                if (onReady != null) {
+                    val resolved = prepareStream(streams.first(), store.debridToken)
+                    onReady(Playback(item, resolved, snapshot.season, snapshot.episode))
+                }
             }
         }
     }

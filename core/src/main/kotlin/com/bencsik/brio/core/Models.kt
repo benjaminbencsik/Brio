@@ -28,7 +28,7 @@ object DemoCatalog {
     private const val BASE = "https://storage.googleapis.com/gtv-videos-bucket/sample/"
     val titles = listOf(
         Title(-1, name = "Big Buck Bunny", overview = "A gentle giant meets three mischievous woodland creatures. An open movie from the Blender Foundation.", year = "2008", demoUrl = BASE + "BigBuckBunny.mp4"),
-        Title(-2, name = "Sintel", overview = "A young adventurer searches for the dragon she befriended. An open fantasy short from the Blender Foundation.", year = "2010", demoUrl = BASE + "Sintel.mp4"),
+        Title(-2, name = "Sintel", overview = "A young adventurer searches for the dragon she befriended. An open fantasy short from the Blender Foundation.", year = "2010", demoUrl = "https://download.blender.org/demo/movies/Sintel.2010.1080p.mkv"),
         Title(-3, name = "Tears of Steel", overview = "A group of warriors and scientists face a robotic threat in Amsterdam. An open sci-fi short from the Blender Foundation.", year = "2012", demoUrl = BASE + "TearsOfSteel.mp4"),
         Title(-4, name = "Elephants Dream", overview = "Two characters explore a strange mechanical world. The Blender Foundation's first open movie.", year = "2006", demoUrl = BASE + "ElephantsDream.mp4")
     )
