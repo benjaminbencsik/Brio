@@ -96,22 +96,20 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
                 update { it.copy(streams = streams, resolving = false) }
                 if (onReady != null) {
-                    val resolved = prepareStream(streams.first(), store.debridToken)
-                    onReady(Playback(item, resolved, snapshot.season, snapshot.episode))
+                    onReady(Playback(item, streams.first(), snapshot.season, snapshot.episode, streams))
                 }
             }
         }
     }
-    fun playback(stream: Stream): Playback? = _state.value.let { s -> s.selected?.let { Playback(it.title, stream, s.season, s.episode) } }
+    fun playback(stream: Stream): Playback? = _state.value.let { s -> s.selected?.let { Playback(it.title, stream, s.season, s.episode, s.streams) } }
     fun playSource(stream: Stream, callback: (Playback) -> Unit) {
         val selected = playback(stream) ?: return
         sourceJob?.cancel()
         sourceJob = viewModelScope.launch {
             update { it.copy(resolving = true) }
             attempt {
-                val resolved = prepareStream(stream, store.debridToken)
                 update { it.copy(resolving = false) }
-                callback(selected.copy(stream = resolved))
+                callback(selected)
             }
         }
     }
