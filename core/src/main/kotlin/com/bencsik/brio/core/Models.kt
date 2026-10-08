@@ -9,14 +9,15 @@ data class Title(
     val backdrop: String? = null,
     val year: String = "",
     val rating: Double = 0.0,
-    val demoUrl: String? = null
+    val demoUrl: String? = null,
+    val imdbId: String? = null
 ) {
     val key: String get() = "$kind:$id"
 }
 data class Episode(val number: Int, val name: String, val overview: String)
 data class Season(val number: Int, val name: String)
 data class Details(val title: Title, val seasons: List<Season> = emptyList())
-data class StreamRequest(val id: Int, val type: String, val season: Int? = null, val episode: Int? = null)
+data class StreamRequest(val id: Int, val type: String, val season: Int? = null, val episode: Int? = null, val imdbId: String? = null)
 data class Stream(val url: String, val name: String = "Source", val quality: String = "Auto", val headers: Map<String, String> = emptyMap(), val introStartMs: Long? = null, val introEndMs: Long? = null, val creditsStartMs: Long? = null, val creditsEndMs: Long? = null, val requiresDebrid: Boolean = false)
 data class Playback(val title: Title, val stream: Stream, val season: Int? = null, val episode: Int? = null, val alternatives: List<Stream>? = null) {
     val key: String get() = "${title.key}:${season ?: 0}:${episode ?: 0}"

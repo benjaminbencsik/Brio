@@ -248,15 +248,14 @@ class PlayerActivity : ComponentActivity() {
         next = null
         val season = playback.season ?: return
         val episode = playback.episode ?: return
-        if (store.tmdbToken.isBlank()) return
         nextInfoJob = lifecycleScope.launch {
             try {
-                val api = MediaRepository(store.tmdbToken)
-                val current = api.episodes(playback.title.id, season)
+                val api = BrioCatalog(store.tmdbToken)
+                val current = api.episodes(playback.title, season)
                 val following = followingEpisode(current, episode)
                 next = if (following != null) season to following.number else {
                     val nextSeason = api.details(playback.title).seasons.filter { it.number > season }.minByOrNull { it.number }
-                    nextSeason?.let { s -> api.episodes(playback.title.id, s.number).firstOrNull()?.let { s.number to it.number } }
+                    nextSeason?.let { s -> api.episodes(playback.title, s.number).firstOrNull()?.let { s.number to it.number } }
                 }
             } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Playback remains usable when catalog is offline. */ }
         }
@@ -267,8 +266,7 @@ class PlayerActivity : ComponentActivity() {
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
-                check(store.provider.isNotBlank()) { "Add a stream provider in Settings to play the next episode." }
-                val streams = resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(playback.title.id, "tv", target.first, target.second))
+                val streams = resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
                 check(streams.isNotEmpty()) { "No streams are available for the next episode. Return to the catalog to choose another source." }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
                 save(); exo?.release(); exo = null

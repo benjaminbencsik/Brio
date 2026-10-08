@@ -39,9 +39,8 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
             var succeeded = false
             update { it.copy(loading = true, error = null, titles = if (more) it.titles else emptyList()) }
             attempt {
-                val titles = if (store.tmdbToken.isBlank()) DemoCatalog.titles.filter { query.isBlank() || it.name.contains(query, true) }
-                else MediaRepository(store.tmdbToken).let { if (query.isBlank()) it.catalog(kind, page) else it.search(query, page) }
-                update { it.copy(titles = if (more) (it.titles + titles).distinctBy { t -> t.key } else titles, loading = false, canLoadMore = titles.size >= 20 && store.tmdbToken.isNotBlank()) }
+                val titles = BrioCatalog(store.tmdbToken).let { if (query.isBlank()) it.catalog(kind, page) else it.search(query, page) }
+                update { it.copy(titles = if (more) (it.titles + titles).distinctBy { t -> t.key } else titles, loading = false, canLoadMore = titles.size >= 20 && (store.tmdbToken.isNotBlank() || query.isBlank())) }
                 succeeded = true
             }
             if (!succeeded && more) page--
@@ -53,7 +52,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
         if (item.demoUrl != null || item.kind !in listOf("movie", "tv")) return
         detailJob = viewModelScope.launch {
             attempt {
-                val details = MediaRepository(store.tmdbToken).details(item)
+                val details = BrioCatalog(store.tmdbToken).details(item)
                 update { it.copy(selected = details) }
                 details.seasons.firstOrNull { it.number > 0 }?.let { chooseSeason(it.number) }
             }
@@ -69,7 +68,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
         update { it.copy(season = number, episode = null, episodes = emptyList(), streams = emptyList(), resolving = false) }
         episodeJob = viewModelScope.launch {
             attempt {
-                val episodes = MediaRepository(store.tmdbToken).episodes(selected.title.id, number)
+                val episodes = BrioCatalog(store.tmdbToken).episodes(selected.title, number)
                 update { it.copy(episodes = episodes, episode = episodes.firstOrNull()?.number) }
             }
         }
@@ -89,9 +88,8 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
             attempt {
                 val streams = when {
                     item.demoUrl != null -> listOf(Stream(item.demoUrl!!, "Blender open movie", "HD"))
-                    store.provider.isBlank() -> error("Add a source provider in Settings or use Open link. TMDB supplies metadata, not video streams.")
                     item.kind == "tv" && (snapshot.season == null || snapshot.episode == null) -> error("Choose a season and episode first.")
-                    else -> resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode))
+                    else -> resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode, item.imdbId))
                 }
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
                 update { it.copy(streams = streams, resolving = false) }

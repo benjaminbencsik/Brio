@@ -1,3 +1,40 @@
+# Built-in catalog and source
+
+Brio 0.3 uses the public Cinemeta catalog when no personal TMDB token is set.
+It maps catalog titles to TMDB IDs for the built-in Vixsrc source. Search,
+seasons, episodes and Next episode work through the same public catalog.
+
+Leaving the custom provider field blank enables Vixsrc. The adapter requests
+the provider's current movie/episode API, immediately fetches the returned
+player page, extracts the public HLS playlist parameters and validates the
+playlist before offering it to Media3. It forwards Referer and User-Agent.
+It does not execute page scripts or display the provider's web ads.
+
+Availability is determined by the third-party provider. Signed links can
+expire; pressing Play again resolves fresh links. There is no claim of
+affiliation with ClipBox, Vixsrc, Netflix or other services. This code does
+not grant subscription access or circumvent DRM.
+
+## Validation
+
+A live movie resolution returned an HTTP 200 HLS master playlist with two
+variants during implementation. This verifies discovery and playlist
+availability from the development network, not complete device playback.
+Device installation, decoding, remote controls and regional availability
+still require testing. Automated fixtures cover API/episode paths, header
+forwarding, token encoding, invalid playlist rejection, public catalog
+mapping and episode selection.
+
+## References
+
+- Official public catalog listing: https://github.com/Stremio/stremio-official-addons
+- Add-on protocol: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md
+- Current provider page/API observed at https://vixsrc.to/
+- Historical integration reference: https://github.com/yoruix/nuvio-providers
+  (its older direct-page extraction no longer matches the current landing page).
+
+---
+
 # Source provider contract
 
 Configure an HTTPS endpoint in Brio Settings. Requests use a TMDB ID and content type:

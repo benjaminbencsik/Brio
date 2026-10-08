@@ -171,7 +171,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 
 @Composable private fun HomeScreen(state: UiState, wide: Boolean, info: (Title) -> Unit, watch: (Title) -> Unit, resume: (Playback) -> Unit) {
     if (state.loading && state.titles.isEmpty()) { Busy(); return }
-    if (state.titles.isEmpty()) { EmptyState("Your next watch", "Connect your catalog in Settings to browse movies and shows."); return }
+    if (state.titles.isEmpty()) { EmptyState("Your next watch", "The public catalog could not load. Retry or check your connection."); return }
     var featuredIndex by rememberSaveable { mutableIntStateOf(0) }
     val featured = state.titles.take(6)
     val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
@@ -342,10 +342,10 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var provider by remember { mutableStateOf(vm.store.provider) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
-        item { SectionTitle("Make Brio yours", "Connect your catalog and optional accounts. Keys stay on this device.") }
-        item { OutlinedTextField(tmdb, { tmdb = it }, label = { Text("TMDB read access token") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { SectionTitle("Make Brio yours", "A public movie and TV catalog is built in. TMDB and Real-Debrid are optional.") }
+        item { OutlinedTextField(tmdb, { tmdb = it }, label = { Text("TMDB read access token (optional)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item {
-            Text("TMDB adds movie and TV information. It does not include video streams.", color = Muted)
+            Text("Leave this blank to use the public catalog. A TMDB token lets you use TMDB instead.", color = Muted)
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org/settings/api"))) }) { Text("Get a TMDB token →") }
         }
         item { HorizontalDivider(color = Slate) }
@@ -360,14 +360,14 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }) { Text("Disconnect Real-Debrid") }
         }
         item { HorizontalDivider(color = Slate) }
-        item { SectionTitle("Stream provider", "Connect a Stremio-compatible add-on or a custom source service.") }
+        item { SectionTitle("Stream provider", "Vixsrc is built in. Leave the field blank to use it, or enter another provider.") }
         item { OutlinedTextField(provider, { provider = it }, label = { Text("Add-on manifest URL or HTTPS endpoint") }, placeholder = { Text("https://your-addon.example/manifest.json") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { Text("Paste the add-on’s complete manifest URL. Brio plays direct HTTPS video links; torrent-only and browser-only sources are unsupported.", color = Muted) }
+        item { Text("Built-in Vixsrc resolves movie and episode links automatically. Availability depends on the provider. Custom add-ons must supply direct HTTPS video links.", color = Muted) }
         item { Button(onClick = { vm.saveSettings(tmdb, provider, debrid) }, modifier = Modifier.fillMaxWidth()) { Text("Save settings") } }
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.1.0 · Made for your next great watch", color = Muted)
+            Text("Brio 0.3.0 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }) { Text("The Movie Database →") }
         }

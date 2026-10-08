@@ -13,9 +13,10 @@ fun normalizeProviderEndpoint(value: String): String =
     requireHttps(value.trim().replaceFirst(Regex("^stremio://"), "https://"))
 
 suspend fun resolveConfiguredSources(endpoint: String, tmdbToken: String, request: StreamRequest): List<Stream> {
+    if (endpoint.isBlank()) return VixsrcStreamProvider().resolve(request)
     val normalized = normalizeProviderEndpoint(endpoint)
     return if (normalized.toHttpUrlOrNull()!!.encodedPath.endsWith("/manifest.json")) {
-        val imdbId = MediaRepository(tmdbToken).imdbId(request)
+        val imdbId = request.imdbId ?: MediaRepository(tmdbToken).imdbId(request)
         StremioStreamProvider(normalized, imdbId).resolve(request)
     } else JsonStreamProvider(normalized).resolve(request)
 }
