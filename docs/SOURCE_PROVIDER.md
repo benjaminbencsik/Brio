@@ -37,3 +37,23 @@ Respond with JSON. All stream URLs must be HTTPS. Providers may resolve their ow
 This contract keeps content discovery independent from provider availability. Provider timestamps cannot be transferred to a different encoding or edited version without checking their accuracy.
 
 For a host link that needs Real-Debrid, return `"requiresDebrid": true` in the stream object. Brio resolves it with the viewer's saved token before playing, including for Next episode. Tokens are sent only to Real-Debrid, never to your provider. Leave the flag absent or false for directly playable streams. Timing markers must still match the resolved media file.
+
+
+## Stremio-compatible add-ons
+
+Settings also accepts a complete HTTPS (or `stremio://`) install URL ending in
+`/manifest.json`. Brio reads the manifest and maps the selected TMDB title to
+its IMDb ID. Movie requests use `/stream/movie/tt12345.json`; episode requests
+use `/stream/series/tt12345:season:episode.json`. Configured path segments
+are preserved. The same adapter is used by Next episode.
+
+Only direct HTTPS `url` entries are supported. Request headers from
+`behaviorHints.proxyHeaders.request` are forwarded to Media3. Torrent info
+hashes, external browser pages, and YouTube IDs are not playable sources.
+No source add-on is installed by default. This integration does not grant
+access to subscription services or guarantee a particular title is available.
+A TMDB token is required for IMDb mapping; Real-Debrid configuration, if needed
+by an add-on, belongs in that add-on's configured manifest URL.
+Add-on subtitle responses and automatic intro timestamps are not implemented.
+
+Protocol: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md

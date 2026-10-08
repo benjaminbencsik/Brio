@@ -287,9 +287,9 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }) { Text("Disconnect Real-Debrid") }
         }
         item { HorizontalDivider(color = Slate) }
-        item { SectionTitle("Stream provider", "An optional source service for movie and episode links.") }
-        item { OutlinedTextField(provider, { provider = it }, label = { Text("HTTPS provider endpoint") }, placeholder = { Text("https://your-server.example/streams") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { Text("You can also use Open link and Local file without a provider.", color = Muted) }
+        item { SectionTitle("Stream provider", "Connect a Stremio-compatible add-on or a custom source service.") }
+        item { OutlinedTextField(provider, { provider = it }, label = { Text("Add-on manifest URL or HTTPS endpoint") }, placeholder = { Text("https://your-addon.example/manifest.json") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { Text("Paste the add-on’s complete manifest URL. Brio plays direct HTTPS video links; torrent-only and browser-only sources are unsupported.", color = Muted) }
         item { Button(onClick = { vm.saveSettings(tmdb, provider, debrid) }, modifier = Modifier.fillMaxWidth()) { Text("Save settings") } }
         item {
             HorizontalDivider(color = Slate)

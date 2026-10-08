@@ -167,7 +167,7 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 check(store.provider.isNotBlank()) { "Add a stream provider in Settings to play the next episode." }
-                val streams = JsonStreamProvider(store.provider).resolve(StreamRequest(playback.title.id, "tv", target.first, target.second))
+                val streams = resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(playback.title.id, "tv", target.first, target.second))
                 check(streams.isNotEmpty()) { "No streams are available for the next episode. Return to the catalog to choose another source." }
                 val nextStream = prepareStream(streams.first(), store.debridToken)
                 save(); exo?.release(); exo = null

@@ -59,6 +59,12 @@ class MediaRepository(
             .map { Season(it.number("season_number"), it.text("name")) }
         return Details(title(json, item.kind), seasons)
     }
+    suspend fun imdbId(request: StreamRequest): String {
+        require(request.type in listOf("movie", "tv"))
+        val id = get("${request.type}/${request.id}/external_ids").text("imdb_id")
+        check(Regex("tt[0-9]+").matches(id)) { "This title has no IMDb ID for add-on sources." }
+        return id
+    }
     suspend fun episodes(id: Int, season: Int): List<Episode> =
         get("tv/$id/season/$season").getAsJsonArray("episodes").map {
             it.asJsonObject.let { j -> Episode(j.number("episode_number"), j.text("name"), j.text("overview")) }

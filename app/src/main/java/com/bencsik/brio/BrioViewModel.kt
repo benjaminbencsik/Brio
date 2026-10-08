@@ -87,7 +87,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                     item.demoUrl != null -> listOf(Stream(item.demoUrl!!, "Blender open movie", "HD"))
                     store.provider.isBlank() -> error("Add a source provider in Settings or use Open link. TMDB supplies metadata, not video streams.")
                     item.kind == "tv" && (snapshot.season == null || snapshot.episode == null) -> error("Choose a season and episode first.")
-                    else -> JsonStreamProvider(store.provider).resolve(StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode))
+                    else -> resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode))
                 }
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
                 update { it.copy(streams = streams, resolving = false) }
@@ -110,8 +110,8 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSettings(tmdb: String, provider: String, debrid: String) {
         try {
             debridJob?.cancel()
-            if (provider.isNotBlank()) requireHttps(provider)
-            store.tmdbToken = tmdb; store.provider = provider; store.debridToken = debrid
+            val normalizedProvider = if (provider.isNotBlank()) normalizeProviderEndpoint(provider) else ""
+            store.tmdbToken = tmdb; store.provider = normalizedProvider; store.debridToken = debrid
             update { it.copy(account = null, downloads = emptyList(), torrents = emptyList(), torrentFiles = emptyList(), notice = "Settings saved.") }
             reload()
         } catch (e: Exception) { update { it.copy(error = e.message) } }
