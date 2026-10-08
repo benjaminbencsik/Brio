@@ -224,6 +224,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         Text(label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(titles, key = { it.key }) { item -> Box(Modifier.width(150.dp)) { Poster(item) { click(item) } } }
+        }
     }
 }
 
