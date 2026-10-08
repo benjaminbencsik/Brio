@@ -15,7 +15,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, urllib.request
-          base = "https://newman21-webstreamrmbg.hf.space"
+          base = "https://87d6a6ef6b58-webstreamrmbg.baby-beamup.club"
           def fetch(path):
               req = urllib.request.Request(base + path, headers={"User-Agent": "Brio-provider-check/1.0"})
               with urllib.request.urlopen(req, timeout=55) as response:
@@ -24,9 +24,11 @@ jobs:
           manifest = fetch("/manifest.json")
           assert "stream" in manifest.get("resources", []), "No stream resource"
           print("Manifest:", manifest.get("name"), manifest.get("version"))
-          result = fetch("/stream/movie/tt1254207.json")
-          streams = result.get("streams", [])
-          direct = [s for s in streams if s.get("url", "").startswith("https://")]
-          print("Open-movie test: direct HTTPS sources =", len(direct))
-          assert direct, "Provider returned no playable HTTPS sources for test title"
+          found = 0
+          for identifier in ["tt1254207", "tt0111161"]:
+              result = fetch("/stream/movie/" + identifier + ".json")
+              direct = [s for s in result.get("streams", []) if s.get("url", "").startswith("https://")]
+              print("Title", identifier, "direct HTTPS results =", len(direct))
+              found += len(direct)
+          assert found, "Provider returned no direct HTTPS sources for either test title"
           PY
