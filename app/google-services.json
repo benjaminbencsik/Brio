@@ -12,7 +12,12 @@
           "package_name": "com.bencsik.brio"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "584936556970-egrmq39ukbc8d9to2867vct8vosmdblb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDhn4xc2kjqF7oo9cZLLJVCYuO0sXqAAO4"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "584936556970-egrmq39ukbc8d9to2867vct8vosmdblb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
