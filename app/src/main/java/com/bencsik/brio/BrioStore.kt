@@ -67,5 +67,8 @@ class BrioStore(context: Context) {
         history.add(0, History(playback, position.coerceAtLeast(0), duration.coerceAtLeast(0), System.currentTimeMillis()))
         putSecret("history", gson.toJson(history.take(50)))
     }
+    fun clearSeriesProgress(title: Title) {
+        putSecret("history", gson.toJson(history().filterNot { it.playback.title.key == title.key }))
+    }
     fun clearHistory() = prefs.edit().remove("history").apply()
 }

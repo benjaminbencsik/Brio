@@ -285,6 +285,14 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 @Composable private fun DetailsScreen(state: UiState, vm: BrioViewModel, wide: Boolean, play: (Playback) -> Unit, link: () -> Unit) {
     val details = state.selected ?: return
     val item = details.title
+    var confirmRestart by remember(item.key) { mutableStateOf(false) }
+    if (confirmRestart) AlertDialog(
+        onDismissRequest = { confirmRestart = false },
+        title = { Text("Restart ${item.name}?") },
+        text = { Text("Clear this show’s saved progress and play Season 1, Episode 1. Your watchlist is kept.") },
+        confirmButton = { TextButton(onClick = { confirmRestart = false; vm.restartSeries(play) }) { Text("Restart series") } },
+        dismissButton = { TextButton(onClick = { confirmRestart = false }) { Text("Cancel") } }
+    )
     LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             TextButton(onClick = vm::closeDetails) { Text("← Back to browsing") }
@@ -306,6 +314,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             }
         }
         if (item.kind == "tv") {
+            item { OutlinedButton(onClick = { confirmRestart = true }, enabled = !state.resolving) { Text("↺ Restart series") } }
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
             items(state.episodes) { episode ->
                 OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
@@ -367,7 +376,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.3.0 · Made for your next great watch", color = Muted)
+            Text("Brio 0.3.1 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }) { Text("The Movie Database →") }
         }

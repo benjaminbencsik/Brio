@@ -79,6 +79,26 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
         select(item)
         if (item.kind != "tv") findSources(callback)
     }
+    fun restartSeries(callback: (Playback) -> Unit) {
+        val item = _state.value.selected?.title ?: return
+        if (item.kind != "tv") return
+        detailJob?.cancel(); episodeJob?.cancel(); sourceJob?.cancel()
+        sourceJob = viewModelScope.launch {
+            update { it.copy(resolving = true, error = null, streams = emptyList()) }
+            attempt {
+                val episodes = BrioCatalog(store.tmdbToken).episodes(item, 1)
+                check(episodes.any { it.number == 1 }) { "Season 1, Episode 1 is not available for this show." }
+                val streams = resolveConfiguredSources(store.provider, store.tmdbToken,
+                    StreamRequest(item.id, "tv", 1, 1, item.imdbId))
+                check(streams.isNotEmpty()) { "No source was found for Season 1, Episode 1. Your progress has been kept." }
+                // Reset only after a playable source has been resolved.
+                store.clearSeriesProgress(item)
+                refreshLibrary()
+                update { it.copy(season = 1, episode = 1, episodes = episodes, streams = streams, resolving = false) }
+                callback(Playback(item, streams.first(), 1, 1, streams))
+            }
+        }
+    }
     fun findSources(onReady: ((Playback) -> Unit)? = null) {
         val snapshot = _state.value
         val item = snapshot.selected?.title ?: return
