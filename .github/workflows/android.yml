@@ -21,12 +21,20 @@ jobs:
       - name: Reuse debug signing key for future updates
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: brio-debug-signing-v1
+          path: .ci-signing/debug.keystore
+          key: brio-debug-signing-v2
+      - name: Prepare a stable debug signing certificate
+        run: |
+          mkdir -p .ci-signing
+          if [ ! -f .ci-signing/debug.keystore ]; then
+            keytool -genkeypair -keystore .ci-signing/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
       - uses: gradle/actions/setup-gradle@v4
       - name: Install SDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Test, lint, and build
+        env:
+          BRIO_DEBUG_KEYSTORE: .ci-signing/debug.keystore
         run: bash gradlew :core:test :app:lintDebug :app:assembleDebug
       - name: Export public signing fingerprints
         run: '"$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee brio-signing-fingerprints.txt'

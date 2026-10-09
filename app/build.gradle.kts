@@ -16,6 +16,16 @@ android {
         versionCode = 7
         versionName = "0.4.0"
     }
+    signingConfigs {
+        getByName("debug") {
+            providers.environmentVariable("BRIO_DEBUG_KEYSTORE").orNull?.let { path ->
+                storeFile = rootProject.file(path)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
