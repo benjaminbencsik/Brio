@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/library/{entry} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['record', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['record', 'updatedAt'])
+        && request.resource.data.record is string
+        && request.resource.data.record.size() <= 16384
+        && request.resource.data.updatedAt is int
+        && request.resource.data.updatedAt >= 0;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -22,7 +22,23 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     private var page = 1
     private var lastQuery = ""
     private var lastKind = "movie"
+    val cloud = FirebaseLibrary.get(application)
+    private val stopLibraryObserver = store.observeLibrary { refreshLibrary() }
     init { reload() }
+    override fun onCleared() { stopLibraryObserver(); super.onCleared() }
+    fun resumeCloud(playback: Playback, callback: (Playback) -> Unit) {
+        sourceJob?.cancel()
+        sourceJob = viewModelScope.launch {
+            update { it.copy(resolving = true, error = null) }
+            attempt {
+                val streams = resolveConfiguredSources(store.provider, store.tmdbToken,
+                    StreamRequest(playback.title.id, playback.title.kind, playback.season, playback.episode, playback.title.imdbId))
+                check(streams.isNotEmpty()) { "No source is available for this saved episode." }
+                update { it.copy(resolving = false) }
+                callback(playback.copy(stream = streams.first(), alternatives = streams))
+            }
+        }
+    }
     private fun update(block: (UiState) -> UiState) { _state.value = block(_state.value) }
     private suspend fun attempt(block: suspend () -> Unit) {
         try { block() } catch (e: CancellationException) { throw e }
@@ -30,7 +46,9 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun dismissError() = update { it.copy(error = null) }
     fun reload() { refreshLibrary(); browse(lastKind, lastQuery) }
-    fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history()) }
+    fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history(),
+        watchedEpisodes = (visibleCloudProgress(store.cloudRecords()).filter { r -> r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9 }.map { r -> r.key } +
+            store.history().filter { h -> h.durationMs > 0 && h.positionMs >= h.durationMs * 0.9 }.map { h -> h.playback.key }).toSet()) }
     fun browse(kind: String = "movie", query: String = "", more: Boolean = false) {
         catalogJob?.cancel()
         lastKind = kind; lastQuery = query
@@ -193,7 +211,7 @@ data class UiState(
     val error: String? = null, val notice: String? = null,
     val selected: Details? = null, val season: Int? = null, val episode: Int? = null, val episodes: List<Episode> = emptyList(),
     val streams: List<Stream> = emptyList(), val resolving: Boolean = false,
-    val watchlist: List<Title> = emptyList(), val history: List<History> = emptyList(),
+    val watchlist: List<Title> = emptyList(), val history: List<History> = emptyList(), val watchedEpisodes: Set<String> = emptySet(),
     val account: DebridAccount? = null, val debridLoading: Boolean = false,
     val downloads: List<DebridFile> = emptyList(), val torrents: List<DebridTorrent> = emptyList(),
     val torrentFiles: List<DebridTorrentFile> = emptyList(), val debridPage: Int = 1, val debridMore: Boolean = false

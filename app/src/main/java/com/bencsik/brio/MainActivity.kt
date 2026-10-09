@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.bencsik.brio.core.*
 import com.google.gson.Gson
+import kotlinx.coroutines.launch
 
 private val Lime = Color(0xFFB8F36A)
 private val Night = Color(0xFF0D0D0F)
@@ -76,8 +77,9 @@ class MainActivity : ComponentActivity() {
     private fun readSharedLink(intent: Intent) {
         if (intent.action == Intent.ACTION_SEND) sharedLink = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
     }
-    override fun onResume() { super.onResume(); vm.refreshLibrary() }
+    override fun onResume() { super.onResume(); vm.refreshLibrary(); vm.cloud.syncNow() }
     private fun play(playback: Playback) {
+        if (playback.stream.url.isBlank()) { vm.resumeCloud(playback, ::play); return }
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("playback", Gson().toJson(playback)))
     }
 }
@@ -275,7 +277,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 Spacer(Modifier.height(16.dp))
                 Text(item.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(12.dp))
-                Text("BLENDER OPEN MOVIE", color = Muted, style = MaterialTheme.typography.labelSmall)
+                Text(if (item.kind == "tv") "TV SERIES" else if (item.demoUrl != null) "BLENDER OPEN MOVIE" else "MOVIE", color = Muted, style = MaterialTheme.typography.labelSmall)
             }
         }
         Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 6.dp, end = 6.dp))
@@ -318,7 +320,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
             items(state.episodes) { episode ->
                 OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
-                    Text("${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
+                    val watched = "${item.key}:${state.season ?: 0}:${episode.number}" in state.watchedEpisodes
+                    Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -347,10 +350,29 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 }
 @Composable private fun SettingsScreen(vm: BrioViewModel, state: UiState) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val account by vm.cloud.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
     var provider by remember { mutableStateOf(vm.store.provider) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+        item {
+            SectionTitle("Your account", "Sign in with Google to sync your watchlist and viewing progress across devices.")
+            Spacer(Modifier.height(12.dp))
+            account.email?.let { Text(it, color = Lime) }
+            Text(account.status, color = Muted)
+            Spacer(Modifier.height(8.dp))
+            if (account.email == null) Button(onClick = {
+                (context as? android.app.Activity)?.let { activity -> scope.launch { vm.cloud.signIn(activity) } }
+            }, enabled = account.configured && !account.busy) { Text(if (account.busy) "Signing in…" else "Sign in with Google") }
+            else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.cloud.syncNow() }) { Text("Sync now") }
+                TextButton(onClick = { scope.launch { vm.cloud.signOut() } }) { Text("Sign out") }
+            }
+            if (!account.configured) Text("Google sign-in will become available after the app’s Firebase project is connected.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text("Signing in imports your guest watchlist and progress. Stream links and provider keys stay on this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider(color = Slate, modifier = Modifier.padding(top = 16.dp))
+        }
         item { SectionTitle("Make Brio yours", "A public movie and TV catalog is built in. TMDB and Real-Debrid are optional.") }
         item { OutlinedTextField(tmdb, { tmdb = it }, label = { Text("TMDB read access token (optional)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item {
@@ -376,7 +398,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.3.2 · Made for your next great watch", color = Muted)
+            Text("Brio 0.4.0 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }) { Text("The Movie Database →") }
         }

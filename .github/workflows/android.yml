@@ -28,6 +28,12 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Test, lint, and build
         run: bash gradlew :core:test :app:lintDebug :app:assembleDebug
+      - name: Export public signing fingerprints
+        run: keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android > brio-signing-fingerprints.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brio-signing-fingerprints
+          path: brio-signing-fingerprints.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Brio-debug-APK
