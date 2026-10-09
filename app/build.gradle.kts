@@ -26,7 +26,7 @@ android {
 }
 dependencies {
     implementation(project(":core"))
-    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("androidx.credentials:credentials:1.3.0")
