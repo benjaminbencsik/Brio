@@ -80,6 +80,27 @@ class BuiltinSourcesTest {
             assertNull(request.getHeader("Authorization"))
         }
     }
+    @Test fun searchLoadsMissingTmdbIdsFromFullMetadata() = runTest {
+        val paths = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            paths.add(request.url.encodedPath)
+            val body = when (request.url.encodedPath) {
+                "/catalog/movie/top/search=shows.json" -> """{"metas":[]}"""
+                "/catalog/series/top/search=shows.json" -> """{"metas":[{"id":"tt0386676","name":"The Office"},{"id":"tt0290988","name":"Trailer Park Boys"}]}"""
+                "/meta/series/tt0386676.json" -> """{"meta":{"moviedb_id":2316,"name":"The Office"}}"""
+                "/meta/series/tt0290988.json" -> """{"meta":{"moviedb_id":3796,"name":"Trailer Park Boys"}}"""
+                else -> error("Unexpected request: ${request.url.encodedPath}")
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val titles = CinemetaRepository(client, "https://catalog.example/").search("shows")
+        assertEquals(listOf(2316, 3796), titles.map { it.id })
+        assertEquals(listOf("tt0386676", "tt0290988"), titles.map { it.imdbId })
+        assertTrue(paths.contains("/meta/series/tt0386676.json"))
+        assertTrue(paths.contains("/meta/series/tt0290988.json"))
+    }
     @Test fun publicEpisodeMetadataSupportsSeasonSelection() = runTest {
         MockWebServer().use { server ->
             val meta = """{"meta":{"moviedb_id":1399,"id":"tt0944947","name":"Test show","videos":[{"season":1,"episode":2,"name":"Second"},{"season":1,"episode":1,"name":"First"},{"season":2,"episode":1,"name":"Other season"}]}}"""

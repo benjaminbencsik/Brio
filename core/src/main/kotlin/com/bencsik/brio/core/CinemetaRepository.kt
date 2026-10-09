@@ -2,6 +2,9 @@ package com.bencsik.brio.core
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -16,6 +19,24 @@ class CinemetaRepository(
     private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).build(),
     private val apiBase: String = "https://v3-cinemeta.strem.io/"
 ) {
+    private val metadataSlots = Semaphore(6)
+    private suspend fun titles(json: JsonObject, kind: String): List<Title> = coroutineScope {
+        json.getAsJsonArray("metas")?.map { element -> async {
+            val summary = element.asJsonObject
+            title(summary, kind) ?: metadataSlots.withPermit {
+                val imdb = summary.text("imdb_id").ifBlank { summary.text("id") }
+                if (!Regex("tt[0-9]+").matches(imdb)) return@withPermit null
+                try {
+                    get("meta", type(kind), "$imdb.json").getAsJsonObject("meta")?.let { full ->
+                        // Keep the search identity even if the detail payload omits it.
+                        if (full.text("imdb_id").isBlank()) full.addProperty("imdb_id", imdb)
+                        title(full, kind)
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { null }
+            }
+        } }?.mapNotNull { it.await() }.orEmpty()
+    }
     private suspend fun get(vararg segments: String): JsonObject = withContext(Dispatchers.IO) {
         val url = apiBase.toHttpUrlOrNull()!!.newBuilder()
         segments.forEach { url.addPathSegment(it) }
@@ -36,12 +57,11 @@ class CinemetaRepository(
         require(page > 0)
         val json = if (page == 1) get("catalog", type(kind), "top.json")
         else get("catalog", type(kind), "top", "skip=${(page - 1) * 48}.json")
-        return json.getAsJsonArray("metas")?.mapNotNull { title(it.asJsonObject, kind) }.orEmpty()
+        return titles(json, kind)
     }
     suspend fun search(query: String): List<Title> = coroutineScope {
         val jobs = listOf("movie", "tv").map { kind -> async {
-            get("catalog", type(kind), "top", "search=$query.json")
-                .getAsJsonArray("metas")?.mapNotNull { title(it.asJsonObject, kind) }.orEmpty()
+            titles(get("catalog", type(kind), "top", "search=$query.json"), kind)
         } }
         jobs.flatMap { it.await() }.distinctBy { it.key }
     }
