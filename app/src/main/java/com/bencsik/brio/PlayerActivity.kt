@@ -46,6 +46,7 @@ class PlayerActivity : ComponentActivity() {
     private var position by mutableLongStateOf(0)
     private var duration by mutableLongStateOf(0)
     private var showActions by mutableStateOf(true)
+    private var controlsTimer: Job? = null
     private var error by mutableStateOf<String?>(null)
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
     private var nextLoading by mutableStateOf(false)
@@ -90,7 +91,10 @@ class PlayerActivity : ComponentActivity() {
                             controllerShowTimeoutMs = 4000
                             setShowSubtitleButton(true)
                             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility -> showActions = visibility == android.view.View.VISIBLE })
+                            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                                if (visibility == android.view.View.VISIBLE) revealControls()
+                                else { showActions = false; controlsTimer?.cancel() }
+                            })
                             playerView = this
                             requestFocus()
                         }
@@ -100,10 +104,14 @@ class PlayerActivity : ComponentActivity() {
                     val actions = skipActions(stream, position, duration)
                     val intro = actions.introTargetMs != null
                     val credits = actions.inCredits
-                    if (!connecting && (intro || credits || (next != null && (finished || showActions)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = if (showActions) 110.dp else 36.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val nearEnd = duration > 0 && position > 0 && duration - position <= 120000
+                    LaunchedEffect(intro, credits, nearEnd, finished) {
+                        if (intro || credits || (next != null && (nearEnd || finished))) revealControls()
+                    }
+                    if (!connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (intro) Button(onClick = { seek(actions.introTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip intro") }
                         if (credits && actions.creditsTargetMs != null) OutlinedButton(onClick = { seek(actions.creditsTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip credits") }
-                        if (next != null && (credits || finished || showActions)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
+                        if (next != null && (credits || nearEnd || finished)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
                     }
                     if (connecting) {
                         Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -151,6 +159,7 @@ class PlayerActivity : ComponentActivity() {
     }
     override fun onStart() { super.onStart(); startPlayer() }
     override fun onStop() {
+        controlsTimer?.cancel()
         connectionGeneration++
         connectionJob?.cancel(); timeoutJob?.cancel()
         exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save(); it.release() }
@@ -232,6 +241,7 @@ class PlayerActivity : ComponentActivity() {
                         Player.STATE_BUFFERING -> armTimeout(generation)
                         Player.STATE_READY, Player.STATE_ENDED -> {
                             timeoutJob?.cancel(); connecting = false; countdown = 0
+                            if (playbackState == Player.STATE_READY) revealControls()
                             if (playbackState == Player.STATE_ENDED) save()
                         }
                     }
@@ -244,6 +254,18 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private fun save() { exo?.let { player -> store.saveProgress(playback, player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0) } }
+    private fun revealControls() {
+        showActions = true
+        controlsTimer?.cancel()
+        controlsTimer = lifecycleScope.launch {
+            delay(5000)
+            if (exo?.isPlaying == true && !serverPicker && error == null) {
+                showActions = false
+                playerView?.hideController()
+                playerView?.requestFocus()
+            }
+        }
+    }
     private fun seek(target: Long) { exo?.seekTo(target.coerceAtLeast(0).let { if (duration > 0) it.coerceAtMost(duration) else it }) }
     private fun loadNextInfo() {
         nextInfoJob?.cancel()
@@ -282,6 +304,8 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER)) revealControls()
         when (keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { exo?.let { if (it.isPlaying) it.pause() else it.play() }; return true }
             KeyEvent.KEYCODE_MEDIA_PLAY -> { exo?.play(); return true }
