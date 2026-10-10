@@ -7,12 +7,16 @@ import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.bencsik.brio.core.*
 import com.google.gson.Gson
@@ -74,8 +78,14 @@ class FirebaseLibrary private constructor(context: Context) {
             auth!!.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
         } catch (_: GetCredentialCancellationException) {
             _state.value = _state.value.copy(status = "Sign-in cancelled.")
+        } catch (_: NoCredentialException) {
+            _state.value = _state.value.copy(status = "No Google credential was available. Check this APK's SHA-1 in Firebase and enable Google sign-in.")
+        } catch (e: GetCredentialException) {
+            _state.value = _state.value.copy(status = "Google account picker failed (${e::class.java.simpleName}). Check the Android SHA-1 in Firebase.")
+        } catch (e: FirebaseAuthException) {
+            _state.value = _state.value.copy(status = "Firebase rejected sign-in (${e.errorCode}). Enable Google in Firebase Authentication.")
         } catch (e: CancellationException) { throw e }
-        catch (_: Exception) { _state.value = _state.value.copy(status = "Google sign-in failed. Check the Firebase setup and try again.") }
+        catch (e: Exception) { _state.value = _state.value.copy(status = "Google sign-in failed (${e::class.java.simpleName}). Check Firebase Authentication setup.") }
         finally { _state.value = _state.value.copy(busy = false) }
     }
     suspend fun signOut() {
@@ -92,7 +102,10 @@ class FirebaseLibrary private constructor(context: Context) {
             .addSnapshotListener { snapshot, error ->
                 if (version != generation || auth?.currentUser?.uid != uid) return@addSnapshotListener
                 if (error != null) {
-                    _state.value = _state.value.copy(status = "Cloud sync unavailable. Progress is saved on this device; tap Sync now to retry.")
+                    val status = if (error is FirebaseFirestoreException && error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED)
+                        "Cloud sync permission denied. Publish Brio's Firestore rules in your Firebase project."
+                    else "Cloud sync unavailable (${error.code}). Progress is saved on this device; tap Sync now to retry."
+                    _state.value = _state.value.copy(status = status)
                     return@addSnapshotListener
                 }
                 val records = snapshot?.documents.orEmpty().mapNotNull { document ->

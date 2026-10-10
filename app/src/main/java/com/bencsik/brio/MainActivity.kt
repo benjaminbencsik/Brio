@@ -92,6 +92,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var kind by rememberSaveable { mutableStateOf("movie") }
     var categoryLabel by rememberSaveable { mutableStateOf("") }
     var categoryGenre by rememberSaveable { mutableStateOf<String?>(null) }
+    var categoryParent by rememberSaveable { mutableStateOf("Home") }
     var query by rememberSaveable { mutableStateOf("") }
     var showLink by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -102,7 +103,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     fun navigate(next: String) {
         vm.closeDetails(); tab = next
         when (next) {
-            "Home" -> { kind = "movie"; vm.browse(kind) }
+            "Home" -> { kind = "movie"; vm.browse(kind); vm.loadHomeRows() }
             "Movies" -> { kind = "movie"; vm.loadCategories(kind) }
             "TV Shows" -> { kind = "tv"; vm.loadCategories(kind) }
             "Search" -> vm.browse(kind, query)
@@ -111,7 +112,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     }
     BackHandler(state.selected != null || tab != "Home") {
         if (state.selected != null) vm.closeDetails()
-        else if (tab == "Category") navigate(if (kind == "tv") "TV Shows" else "Movies")
+        else if (tab == "Category") navigate(categoryParent)
         else navigate("Home")
     }
     Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) },
@@ -164,9 +165,13 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
                             state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, compact, play) { showLink = true } }
-                            tab == "Home" -> HomeScreen(state, wide, compact, vm::select, { vm.watch(it, play) }, play)
+                            tab == "Home" -> HomeScreen(state, wide, compact, vm::select, { vm.watch(it, play) }, play) { label, shelfKind, genre ->
+                                kind = shelfKind; categoryLabel = label; categoryGenre = genre; categoryParent = "Home"
+                                tab = "Category"; vm.browse(kind, genre = genre)
+                            }
                             tab == "Movies" || tab == "TV Shows" -> CategoryScreen(state, kind, vm::select) { label, genre ->
-                                categoryLabel = label; categoryGenre = genre; tab = "Category"; vm.browse(kind, genre = genre)
+                                categoryLabel = label; categoryGenre = genre; categoryParent = tab
+                                tab = "Category"; vm.browse(kind, genre = genre)
                             }
                             tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state) }
                             tab == "Debrid" -> Box(Modifier.padding(horizontal = 16.dp)) { DebridScreen(vm, state, play) }
@@ -192,14 +197,17 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     if (showLink) LinkDialog(sharedLink, vm, state.resolving, { showLink = false; clearShared() }, play)
 }
 
-@Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, info: (Title) -> Unit, watch: (Title) -> Unit, resume: (Playback) -> Unit) {
-    if (state.loading && state.titles.isEmpty()) { Busy(); return }
-    if (state.titles.isEmpty()) { EmptyState("Your next watch", "The public catalog could not load. Retry or check your connection."); return }
+@Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, info: (Title) -> Unit,
+    watch: (Title) -> Unit, resume: (Playback) -> Unit, all: (String, String, String?) -> Unit) {
+    if ((state.loading || state.homeLoading) && state.titles.isEmpty() && state.homeRows.isEmpty()) { Busy(); return }
+    if (state.titles.isEmpty() && state.homeRows.values.all { it.isEmpty() }) {
+        EmptyState("Your next watch", "The public catalog could not load. Retry or check your connection."); return
+    }
     var featuredIndex by rememberSaveable { mutableIntStateOf(0) }
     val featured = state.titles.take(6)
-    val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        item {
+        if (featured.isNotEmpty()) item {
+            val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
             Box(Modifier.fillMaxWidth().height(if (compact) 250.dp else if (wide) 430.dp else 390.dp).background(Slate)) {
                 (title.backdrop ?: title.poster)?.let { AsyncImage(it, title.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xAA0D0D0F), Night))))
@@ -238,7 +246,14 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 }
             }
         }
-        item { PosterRow("Popular right now", state.titles, info) }
+        if (state.titles.isNotEmpty()) item { PosterRow("Popular right now", state.titles, info) { all("Popular Movies", "movie", null) } }
+        HOME_SHELVES.forEach { (label, shelfKind, genre) ->
+            val titles = state.homeRows[label].orEmpty()
+            if (titles.isNotEmpty()) item(key = label) { PosterRow(label, titles, info) { all(label, shelfKind, genre) } }
+        }
+        if (state.homeLoading && state.homeRows.isEmpty()) item {
+            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Lime) }
+        }
         if (state.watchlist.isNotEmpty()) item { PosterRow("My List", state.watchlist, info) }
     }
 }
@@ -442,7 +457,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.4.1 · Made for your next great watch", color = Muted)
+            Text("Brio 0.4.2 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }

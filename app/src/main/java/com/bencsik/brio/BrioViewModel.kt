@@ -19,6 +19,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     val state = _state.asStateFlow()
     private var catalogJob: Job? = null
     private var categoryJob: Job? = null
+    private var homeJob: Job? = null
     private var detailJob: Job? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
@@ -29,7 +30,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     private var lastGenre: String? = null
     val cloud = FirebaseLibrary.get(application)
     private val stopLibraryObserver = store.observeLibrary { refreshLibrary() }
-    init { reload() }
+    init { reload(); loadHomeRows() }
     override fun onCleared() { stopLibraryObserver(); super.onCleared() }
     fun resumeCloud(playback: Playback, callback: (Playback) -> Unit) {
         sourceJob?.cancel()
@@ -91,6 +92,25 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                 } }
             }
             update { it.copy(categoriesLoading = false) }
+        }
+    }
+    fun loadHomeRows() {
+        homeJob?.cancel()
+        update { it.copy(homeRows = emptyMap(), homeLoading = true) }
+        homeJob = viewModelScope.launch {
+            val slots = Semaphore(3)
+            coroutineScope {
+                HOME_SHELVES.forEach { (label, kind, genre) -> launch {
+                    slots.withPermit {
+                        try {
+                            val titles = BrioCatalog(store.tmdbToken).category(kind, genre, limit = 12)
+                            update { it.copy(homeRows = it.homeRows + (label to titles)) }
+                        } catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { /* Other rows remain usable if one catalog request fails. */ }
+                    }
+                } }
+            }
+            update { it.copy(homeLoading = false) }
         }
     }
     fun select(item: Title) {
@@ -184,7 +204,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
             val normalizedProvider = if (provider.isNotBlank()) normalizeProviderEndpoint(provider) else ""
             store.tmdbToken = tmdb; store.provider = normalizedProvider; store.debridToken = debrid
             update { it.copy(account = null, downloads = emptyList(), torrents = emptyList(), torrentFiles = emptyList(), notice = "Settings saved.") }
-            reload()
+            reload(); loadHomeRows()
         } catch (e: Exception) { update { it.copy(error = e.message) } }
     }
     fun connectDebrid(token: String) {
@@ -242,6 +262,7 @@ data class UiState(
     val streams: List<Stream> = emptyList(), val resolving: Boolean = false,
     val watchlist: List<Title> = emptyList(), val history: List<History> = emptyList(), val watchedEpisodes: Set<String> = emptySet(),
     val categoryRows: Map<String, List<Title>> = emptyMap(), val categoriesLoading: Boolean = false, val categoryError: String? = null,
+    val homeRows: Map<String, List<Title>> = emptyMap(), val homeLoading: Boolean = false,
     val account: DebridAccount? = null, val debridLoading: Boolean = false,
     val downloads: List<DebridFile> = emptyList(), val torrents: List<DebridTorrent> = emptyList(),
     val torrentFiles: List<DebridTorrentFile> = emptyList(), val debridPage: Int = 1, val debridMore: Boolean = false
@@ -251,4 +272,8 @@ val MOVIE_CATEGORIES = listOf("Popular Movies" to null, "Action" to "Action", "C
     "Drama" to "Drama", "Horror" to "Horror", "Sci-Fi" to "Sci-Fi", "Animation" to "Animation")
 val TV_CATEGORIES = listOf("Popular TV Shows" to null, "Action" to "Action", "Comedy" to "Comedy",
     "Drama" to "Drama", "Crime" to "Crime", "Sci-Fi" to "Sci-Fi", "Animation" to "Animation", "Documentary" to "Documentary")
+val HOME_SHELVES = listOf(
+    Triple("Popular TV Shows", "tv", null), Triple("Action Movies", "movie", "Action"),
+    Triple("Comedy TV Shows", "tv", "Comedy"), Triple("Drama Movies", "movie", "Drama"),
+    Triple("Sci-Fi TV Shows", "tv", "Sci-Fi"), Triple("Horror Movies", "movie", "Horror"))
 
