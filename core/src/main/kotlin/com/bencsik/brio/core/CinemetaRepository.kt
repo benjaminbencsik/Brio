@@ -20,8 +20,8 @@ class CinemetaRepository(
     private val apiBase: String = "https://v3-cinemeta.strem.io/"
 ) {
     private val metadataSlots = Semaphore(6)
-    private suspend fun titles(json: JsonObject, kind: String): List<Title> = coroutineScope {
-        json.getAsJsonArray("metas")?.map { element -> async {
+    private suspend fun titles(json: JsonObject, kind: String, limit: Int = 48): List<Title> = coroutineScope {
+        json.getAsJsonArray("metas")?.take(limit)?.map { element -> async {
             val summary = element.asJsonObject
             title(summary, kind) ?: metadataSlots.withPermit {
                 val imdb = summary.text("imdb_id").ifBlank { summary.text("id") }
@@ -53,11 +53,12 @@ class CinemetaRepository(
         require(kind in listOf("movie", "tv"))
         return if (kind == "tv") "series" else "movie"
     }
-    suspend fun catalog(kind: String, page: Int = 1): List<Title> {
+    suspend fun catalog(kind: String, page: Int = 1, genre: String? = null, limit: Int = 48): List<Title> {
         require(page > 0)
-        val json = if (page == 1) get("catalog", type(kind), "top.json")
-        else get("catalog", type(kind), "top", "skip=${(page - 1) * 48}.json")
-        return titles(json, kind)
+        val extras = listOfNotNull(genre?.let { "genre=$it" }, if (page > 1) "skip=${(page - 1) * 48}" else null)
+        val json = if (extras.isEmpty()) get("catalog", type(kind), "top.json")
+        else get("catalog", type(kind), "top", "${extras.joinToString("&")}.json")
+        return titles(json, kind, limit)
     }
     suspend fun search(query: String): List<Title> = coroutineScope {
         val jobs = listOf("movie", "tv").map { kind -> async {
@@ -106,9 +107,14 @@ class BrioCatalog(private val token: String) {
     private val tmdb = MediaRepository(token)
     suspend fun catalog(kind: String, page: Int = 1): List<Title> =
         if (token.isBlank()) publicCatalog.catalog(kind, page) else tmdb.catalog(kind, page)
+    suspend fun category(kind: String, genre: String?, page: Int = 1, limit: Int = 48): List<Title> =
+        if (token.isBlank()) publicCatalog.catalog(kind, page, genre, limit)
+        else if (genre == null) tmdb.catalog(kind, page).take(limit)
+        else tmdb.category(kind, genre, page).take(limit)
     suspend fun search(query: String, page: Int = 1): List<Title> =
         if (token.isBlank()) publicCatalog.search(query) else tmdb.search(query, page)
     suspend fun details(item: Title): Details = if (token.isBlank()) publicCatalog.details(item) else tmdb.details(item)
     suspend fun episodes(item: Title, season: Int): List<Episode> =
         if (token.isBlank()) publicCatalog.episodes(item, season) else tmdb.episodes(item.id, season)
 }
+

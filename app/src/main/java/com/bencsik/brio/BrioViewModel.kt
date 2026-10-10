@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.bencsik.brio.core.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -15,6 +18,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
     private var catalogJob: Job? = null
+    private var categoryJob: Job? = null
     private var detailJob: Job? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
@@ -22,6 +26,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     private var page = 1
     private var lastQuery = ""
     private var lastKind = "movie"
+    private var lastGenre: String? = null
     val cloud = FirebaseLibrary.get(application)
     private val stopLibraryObserver = store.observeLibrary { refreshLibrary() }
     init { reload() }
@@ -45,23 +50,47 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
         catch (e: Exception) { update { it.copy(error = e.message ?: "Connection failed. Please try again.", loading = false, resolving = false, debridLoading = false) } }
     }
     fun dismissError() = update { it.copy(error = null) }
-    fun reload() { refreshLibrary(); browse(lastKind, lastQuery) }
+    fun reload() { refreshLibrary(); browse(lastKind, lastQuery, genre = lastGenre) }
     fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history(),
         watchedEpisodes = (visibleCloudProgress(store.cloudRecords()).filter { r -> r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9 }.map { r -> r.key } +
             store.history().filter { h -> h.durationMs > 0 && h.positionMs >= h.durationMs * 0.9 }.map { h -> h.playback.key }).toSet()) }
-    fun browse(kind: String = "movie", query: String = "", more: Boolean = false) {
+    fun browse(kind: String = "movie", query: String = "", more: Boolean = false, genre: String? = null) {
         catalogJob?.cancel()
-        lastKind = kind; lastQuery = query
+        lastKind = kind; lastQuery = query; lastGenre = genre
         if (!more) page = 1 else page++
         catalogJob = viewModelScope.launch {
             var succeeded = false
             update { it.copy(loading = true, error = null, titles = if (more) it.titles else emptyList()) }
             attempt {
-                val titles = BrioCatalog(store.tmdbToken).let { if (query.isBlank()) it.catalog(kind, page) else it.search(query, page) }
+                val titles = BrioCatalog(store.tmdbToken).let {
+                    if (query.isNotBlank()) it.search(query, page)
+                    else if (genre != null) it.category(kind, genre, page)
+                    else it.catalog(kind, page)
+                }
                 update { it.copy(titles = if (more) (it.titles + titles).distinctBy { t -> t.key } else titles, loading = false, canLoadMore = titles.size >= 20 && (store.tmdbToken.isNotBlank() || query.isBlank())) }
                 succeeded = true
             }
             if (!succeeded && more) page--
+        }
+    }
+    fun loadCategories(kind: String) {
+        categoryJob?.cancel()
+        val sections = if (kind == "movie") MOVIE_CATEGORIES else TV_CATEGORIES
+        update { it.copy(categoryRows = emptyMap(), categoriesLoading = true, categoryError = null) }
+        categoryJob = viewModelScope.launch {
+            val slots = Semaphore(3)
+            coroutineScope {
+                sections.forEach { (label, genre) -> launch {
+                    slots.withPermit {
+                        try {
+                            val titles = BrioCatalog(store.tmdbToken).category(kind, genre, limit = 12)
+                            update { it.copy(categoryRows = it.categoryRows + (label to titles)) }
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { update { it.copy(categoryError = e.message ?: "Some categories could not load.") } }
+                    }
+                } }
+            }
+            update { it.copy(categoriesLoading = false) }
         }
     }
     fun select(item: Title) {
@@ -212,7 +241,14 @@ data class UiState(
     val selected: Details? = null, val season: Int? = null, val episode: Int? = null, val episodes: List<Episode> = emptyList(),
     val streams: List<Stream> = emptyList(), val resolving: Boolean = false,
     val watchlist: List<Title> = emptyList(), val history: List<History> = emptyList(), val watchedEpisodes: Set<String> = emptySet(),
+    val categoryRows: Map<String, List<Title>> = emptyMap(), val categoriesLoading: Boolean = false, val categoryError: String? = null,
     val account: DebridAccount? = null, val debridLoading: Boolean = false,
     val downloads: List<DebridFile> = emptyList(), val torrents: List<DebridTorrent> = emptyList(),
     val torrentFiles: List<DebridTorrentFile> = emptyList(), val debridPage: Int = 1, val debridMore: Boolean = false
 )
+
+val MOVIE_CATEGORIES = listOf("Popular Movies" to null, "Action" to "Action", "Comedy" to "Comedy",
+    "Drama" to "Drama", "Horror" to "Horror", "Sci-Fi" to "Sci-Fi", "Animation" to "Animation")
+val TV_CATEGORIES = listOf("Popular TV Shows" to null, "Action" to "Action", "Comedy" to "Comedy",
+    "Drama" to "Drama", "Crime" to "Crime", "Sci-Fi" to "Sci-Fi", "Animation" to "Animation", "Documentary" to "Documentary")
+

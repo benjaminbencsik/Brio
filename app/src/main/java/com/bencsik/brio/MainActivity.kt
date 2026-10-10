@@ -54,6 +54,7 @@ private val Slate = Color(0xFF242426)
 private val Muted = Color(0xFF9BA8BA)
 private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
+
 class MainActivity : ComponentActivity() {
     private val vm: BrioViewModel by viewModels()
     private var sharedLink by mutableStateOf("")
@@ -89,6 +90,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     val state by vm.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf("Home") }
     var kind by rememberSaveable { mutableStateOf("movie") }
+    var categoryLabel by rememberSaveable { mutableStateOf("") }
+    var categoryGenre by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var showLink by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
@@ -99,18 +102,38 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     fun navigate(next: String) {
         vm.closeDetails(); tab = next
         when (next) {
-            "Home", "Movies" -> { kind = "movie"; vm.browse(kind) }
-            "TV Shows" -> { kind = "tv"; vm.browse(kind) }
+            "Home" -> { kind = "movie"; vm.browse(kind) }
+            "Movies" -> { kind = "movie"; vm.loadCategories(kind) }
+            "TV Shows" -> { kind = "tv"; vm.loadCategories(kind) }
             "Search" -> vm.browse(kind, query)
             "Debrid" -> vm.loadDebrid()
         }
     }
     BackHandler(state.selected != null || tab != "Home") {
-        if (state.selected != null) vm.closeDetails() else navigate("Home")
+        if (state.selected != null) vm.closeDetails()
+        else if (tab == "Category") navigate(if (kind == "tv") "TV Shows" else "Movies")
+        else navigate("Home")
     }
     Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (!tv) NavigationBar(containerColor = Color(0xFF19191B)) {
+            if (tv) Box(Modifier.fillMaxWidth().background(Color(0xFF19191B)), contentAlignment = Alignment.Center) {
+                Row(Modifier.widthIn(max = 800.dp).fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Tabs.forEachIndexed { index, label ->
+                        val interaction = remember { MutableInteractionSource() }
+                        val focused by interaction.collectIsFocusedAsState()
+                        TextButton(onClick = { navigate(label) }, interactionSource = interaction,
+                            modifier = Modifier.weight(1f).fillMaxHeight().border(
+                                if (focused) 2.dp else 0.dp, if (focused) Lime else Color.Transparent, RoundedCornerShape(12.dp)),
+                            colors = ButtonDefaults.textButtonColors(contentColor = if (tab == label) Lime else Color.White)) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(listOf("⌂", "▶", "▣", "♡", "⚙")[index], style = MaterialTheme.typography.titleMedium)
+                                Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            } else NavigationBar(containerColor = Color(0xFF19191B)) {
                 Tabs.forEachIndexed { index, label ->
                     NavigationBarItem(selected = tab == label, onClick = { navigate(label) },
                         icon = { Text(listOf("⌂", "▶", "▣", "♡", "⚙")[index], style = MaterialTheme.typography.titleLarge) },
@@ -121,32 +144,30 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             }
         }) { padding ->
         BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            val wide = maxWidth > 800.dp || tv
-            Row(Modifier.fillMaxSize()) {
-                if (tv) Column(Modifier.width(160.dp).fillMaxHeight().background(Slate).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Brand()
-                    Tabs.forEach { label -> NavButton(label, tab == label) { navigate(label) } }
-                    NavButton("Search", tab == "Search") { navigate("Search") }
-                }
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Row(Modifier.fillMaxWidth().background(Color(0xFF151518)).padding(horizontal = 16.dp, vertical = 10.dp),
+            val wide = maxWidth > 600.dp
+            val compact = tv || maxHeight < 580.dp
+            Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth().background(Color(0xFF151518)).padding(horizontal = 16.dp, vertical = if (compact) 2.dp else 10.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Box {
-                            TextButton(onClick = { menu = true }) { Text("☰", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
+                            TextButton(onClick = { menu = true }, modifier = Modifier.focusRing()) { Text("More", color = Color.White) }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                DropdownMenuItem(text = { Text("Continue watching") }, onClick = { menu = false; navigate("Continue") })
-                                DropdownMenuItem(text = { Text("Real-Debrid") }, onClick = { menu = false; navigate("Debrid") })
-                                DropdownMenuItem(text = { Text("Open link") }, onClick = { menu = false; showLink = true })
-                                if (!tv) DropdownMenuItem(text = { Text("Local file") }, onClick = { menu = false; local() })
+                                DropdownMenuItem(text = { Text("Continue watching") }, onClick = { menu = false; navigate("Continue") }, modifier = Modifier.focusRing())
+                                DropdownMenuItem(text = { Text("Real-Debrid") }, onClick = { menu = false; navigate("Debrid") }, modifier = Modifier.focusRing())
+                                DropdownMenuItem(text = { Text("Open link") }, onClick = { menu = false; showLink = true }, modifier = Modifier.focusRing())
+                                if (!tv) DropdownMenuItem(text = { Text("Local file") }, onClick = { menu = false; local() }, modifier = Modifier.focusRing())
                             }
                         }
                         Brand()
-                        TextButton(onClick = { navigate("Search") }) { Text("Search", color = Color.White) }
+                        TextButton(onClick = { navigate("Search") }, modifier = Modifier.focusRing()) { Text("Search", color = Color.White) }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
-                            state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, play) { showLink = true } }
-                            tab == "Home" -> HomeScreen(state, wide, vm::select, { vm.watch(it, play) }, play)
+                            state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, compact, play) { showLink = true } }
+                            tab == "Home" -> HomeScreen(state, wide, compact, vm::select, { vm.watch(it, play) }, play)
+                            tab == "Movies" || tab == "TV Shows" -> CategoryScreen(state, kind, vm::select) { label, genre ->
+                                categoryLabel = label; categoryGenre = genre; tab = "Category"; vm.browse(kind, genre = genre)
+                            }
                             tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state) }
                             tab == "Debrid" -> Box(Modifier.padding(horizontal = 16.dp)) { DebridScreen(vm, state, play) }
                             tab == "Continue" -> Box(Modifier.padding(horizontal = 16.dp)) { HistoryScreen(state, play, { vm.store.clearHistory(); vm.refreshLibrary() }) }
@@ -157,21 +178,21 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                         keyboardActions = KeyboardActions(onSearch = { vm.browse(kind, query) }),
-                                        trailingIcon = { TextButton(onClick = { vm.browse(kind, query) }) { Text("Go") } })
-                                } else Text(tab, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 16.dp))
+                                        trailingIcon = { TextButton(onClick = { vm.browse(kind, query) }, modifier = Modifier.focusRing()) { Text("Go") } })
+                                } else Text(if (tab == "Category") categoryLabel else tab, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 16.dp))
                                 CatalogGrid(state.titles, wide, state.loading, state.canLoadMore, "Nothing found",
-                                    "Try another search or check Settings.", vm::select, { vm.browse(kind, if (tab == "Search") query else "", more = true) })
+                                    "Try another search or check Settings.", vm::select, { vm.browse(kind, if (tab == "Search") query else "", more = true,
+                                        genre = if (tab == "Category") categoryGenre else null) })
                             }
                         }
                     }
-                }
             }
         }
     }
     if (showLink) LinkDialog(sharedLink, vm, state.resolving, { showLink = false; clearShared() }, play)
 }
 
-@Composable private fun HomeScreen(state: UiState, wide: Boolean, info: (Title) -> Unit, watch: (Title) -> Unit, resume: (Playback) -> Unit) {
+@Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, info: (Title) -> Unit, watch: (Title) -> Unit, resume: (Playback) -> Unit) {
     if (state.loading && state.titles.isEmpty()) { Busy(); return }
     if (state.titles.isEmpty()) { EmptyState("Your next watch", "The public catalog could not load. Retry or check your connection."); return }
     var featuredIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -179,10 +200,10 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         item {
-            Box(Modifier.fillMaxWidth().height(if (wide) 480.dp else 430.dp).background(Slate)) {
+            Box(Modifier.fillMaxWidth().height(if (compact) 250.dp else if (wide) 430.dp else 390.dp).background(Slate)) {
                 (title.backdrop ?: title.poster)?.let { AsyncImage(it, title.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xAA0D0D0F), Night))))
-                Column(Modifier.align(Alignment.BottomStart).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.align(Alignment.BottomStart).padding(if (compact) 16.dp else 24.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 14.dp)) {
                     Text(title.name, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(listOf(title.year, if (title.rating > 0) "★ %.1f".format(title.rating) else "", if (title.kind == "tv") "TV Show" else "Movie").filter { it.isNotBlank() }.joinToString(" · "), color = Color(0xFFCCCCCC))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -193,21 +214,21 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = { watch(title) }, enabled = !state.resolving,
+                        Button(onClick = { watch(title) }, enabled = !state.resolving, modifier = Modifier.focusRing(),
                             shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 28.dp, vertical = 16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play", fontWeight = FontWeight.Bold) }
-                        Button(onClick = { info(title) }, shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                        Button(onClick = { info(title) }, modifier = Modifier.focusRing(), shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Slate, contentColor = Color.White)) { Text("ⓘ Info") }
                     }
                 }
             }
         }
-        if (state.history.isNotEmpty()) {
+        if (state.history.any { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("Continue watching", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
                     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(state.history, key = { it.playback.key }) { history ->
+                        items(state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }, key = { it.playback.key }) { history ->
                             Column(Modifier.width(150.dp)) {
                                 Poster(history.playback.title) { resume(history.playback) }
                                 if (history.durationMs > 0) LinearProgressIndicator(progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
@@ -221,9 +242,31 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         if (state.watchlist.isNotEmpty()) item { PosterRow("My List", state.watchlist, info) }
     }
 }
-@Composable private fun PosterRow(label: String, titles: List<Title>, click: (Title) -> Unit) {
+@Composable private fun CategoryScreen(state: UiState, kind: String, info: (Title) -> Unit, all: (String, String?) -> Unit) {
+    val sections = if (kind == "tv") TV_CATEGORIES else MOVIE_CATEGORIES
+    if (state.categoriesLoading && state.categoryRows.isEmpty()) { Busy(); return }
+    if (state.categoryRows.values.all { it.isEmpty() }) {
+        EmptyState("Categories unavailable", state.categoryError ?: "Check your connection and try this section again.")
+        return
+    }
+    LazyColumn(contentPadding = PaddingValues(top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+        sections.forEach { (label, genre) ->
+            val titles = state.categoryRows[label].orEmpty()
+            if (titles.isNotEmpty()) item(key = label) {
+                PosterRow(label, titles, info) { all(label, genre) }
+            }
+        }
+    }
+}
+
+@Composable private fun PosterRow(label: String, titles: List<Title>, click: (Title) -> Unit, all: (() -> Unit)? = null) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            if (all != null) OutlinedButton(onClick = all, modifier = Modifier.focusRing(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) { Text("All  ›") }
+        }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(titles, key = { it.key }) { item -> Box(Modifier.width(150.dp)) { Poster(item) { click(item) } } }
         }
@@ -237,8 +280,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     }
 }
 @Composable private fun NavButton(label: String, selected: Boolean, click: () -> Unit) {
-    if (selected) Button(onClick = click, shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) { Text(label) }
-    else TextButton(onClick = click, shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) { Text(label, color = Muted) }
+    if (selected) Button(onClick = click, modifier = Modifier.focusRing(), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) { Text(label) }
+    else TextButton(onClick = click, modifier = Modifier.focusRing(), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) { Text(label, color = Muted) }
 }
 @Composable private fun Hero(wide: Boolean, demo: Boolean, click: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(if (wide) 190.dp else 160.dp).clip(RoundedCornerShape(22.dp))
@@ -261,7 +304,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             verticalArrangement = Arrangement.spacedBy(20.dp), contentPadding = PaddingValues(8.dp), modifier = Modifier.weight(1f)) {
             items(titles, key = { it.key }) { item -> Poster(item) { select(item) } }
         }
-        if (more) TextButton(onClick = loadMore, enabled = !loading, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text(if (loading) "Loading…" else "Load more") }
+        if (more) TextButton(onClick = loadMore, enabled = !loading, modifier = Modifier.align(Alignment.CenterHorizontally).focusRing()) { Text(if (loading) "Loading…" else "Load more") }
     }
 }
 @Composable private fun Poster(item: Title, click: () -> Unit) {
@@ -284,7 +327,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         Text(listOf(item.year, if (item.kind == "tv") "TV series" else "Movie").filter { it.isNotBlank() }.joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp))
     }
 }
-@Composable private fun DetailsScreen(state: UiState, vm: BrioViewModel, wide: Boolean, play: (Playback) -> Unit, link: () -> Unit) {
+@Composable private fun DetailsScreen(state: UiState, vm: BrioViewModel, wide: Boolean, compact: Boolean, play: (Playback) -> Unit, link: () -> Unit) {
     val details = state.selected ?: return
     val item = details.title
     var confirmRestart by remember(item.key) { mutableStateOf(false) }
@@ -292,13 +335,13 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         onDismissRequest = { confirmRestart = false },
         title = { Text("Restart ${item.name}?") },
         text = { Text("Clear this show’s saved progress and play Season 1, Episode 1. Your watchlist is kept.") },
-        confirmButton = { TextButton(onClick = { confirmRestart = false; vm.restartSeries(play) }) { Text("Restart series") } },
-        dismissButton = { TextButton(onClick = { confirmRestart = false }) { Text("Cancel") } }
+        confirmButton = { TextButton(onClick = { confirmRestart = false; vm.restartSeries(play) }, modifier = Modifier.focusRing()) { Text("Restart series") } },
+        dismissButton = { TextButton(onClick = { confirmRestart = false }, modifier = Modifier.focusRing()) { Text("Cancel") } }
     )
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 16.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
-            TextButton(onClick = vm::closeDetails) { Text("← Back to browsing") }
-            Box(Modifier.fillMaxWidth().height(if (wide) 210.dp else 180.dp).clip(RoundedCornerShape(18.dp)).background(Slate)) {
+            TextButton(onClick = vm::closeDetails, modifier = Modifier.focusRing()) { Text("← Back to browsing") }
+            Box(Modifier.fillMaxWidth().height(if (compact) 170.dp else if (wide) 210.dp else 180.dp).clip(RoundedCornerShape(18.dp)).background(Slate)) {
                 item.backdrop?.let { AsyncImage(it, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Night))))
                 Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
@@ -310,35 +353,36 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item { Text(item.overview.ifBlank { "No description available." }, color = Muted, style = MaterialTheme.typography.bodyLarge) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.findSources(play) }, enabled = !state.resolving && (item.kind != "tv" || state.episode != null), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play") }
-                if (state.streams.isNotEmpty()) TextButton(onClick = { vm.findSources() }) { Text("Servers") }
-                OutlinedButton(onClick = { vm.toggle(item) }) { Text(if (state.watchlist.any { it.key == item.key }) "✓ Saved" else "+ Watchlist") }
+                Button(onClick = { vm.findSources(play) }, enabled = !state.resolving && (item.kind != "tv" || state.episode != null), modifier = Modifier.focusRing(), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play") }
+                if (state.streams.isNotEmpty()) TextButton(onClick = { vm.findSources() }, modifier = Modifier.focusRing()) { Text("Servers") }
+                OutlinedButton(onClick = { vm.toggle(item) }, modifier = Modifier.focusRing()) { Text(if (state.watchlist.any { it.key == item.key }) "✓ Saved" else "+ Watchlist") }
             }
         }
         if (item.kind == "tv") {
-            item { OutlinedButton(onClick = { confirmRestart = true }, enabled = !state.resolving) { Text("↺ Restart series") } }
+            item { OutlinedButton(onClick = { confirmRestart = true }, enabled = !state.resolving, modifier = Modifier.focusRing()) { Text("↺ Restart series") } }
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
             items(state.episodes) { episode ->
-                OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
+                OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth().focusRing(), border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
                     val watched = "${item.key}:${state.season ?: 0}:${episode.number}" in state.watchedEpisodes
                     Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
                 }
             }
         }
         items(state.streams) { stream ->
-            Button(onClick = { vm.playSource(stream, play) }, enabled = !state.resolving, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Slate, contentColor = Color.White)) {
+            Button(onClick = { vm.playSource(stream, play) }, enabled = !state.resolving, modifier = Modifier.fillMaxWidth().focusRing(), colors = ButtonDefaults.buttonColors(containerColor = Slate, contentColor = Color.White)) {
                 Text("▶  ${stream.name}   ·   ${stream.quality}", modifier = Modifier.fillMaxWidth().padding(8.dp))
             }
         }
-        item { TextButton(onClick = link) { Text("Have a link? Open it directly →") } }
+        item { TextButton(onClick = link, modifier = Modifier.focusRing()) { Text("Have a link? Open it directly →") } }
     }
 }
 @Composable private fun HistoryScreen(state: UiState, play: (Playback) -> Unit, clear: () -> Unit) {
-    if (state.history.isEmpty()) { EmptyState("Pick up where you left off", "Your recent watches will appear here."); return }
+    val inProgress = state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
+    if (inProgress.isEmpty()) { EmptyState("Nothing to continue yet", "Start watching a video, then return here to resume it."); return }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item { TextButton(onClick = clear) { Text("Clear watch history") } }
-        items(state.history, key = { it.playback.key }) { history ->
-            Card(onClick = { play(history.playback) }, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate)) {
+        item { TextButton(onClick = clear, modifier = Modifier.focusRing()) { Text("Clear watch history") } }
+        items(inProgress, key = { it.playback.key }) { history ->
+            Card(onClick = { play(history.playback) }, modifier = Modifier.fillMaxWidth().focusRing(), colors = CardDefaults.cardColors(containerColor = Slate)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("▶  ${history.playback.label}", fontWeight = FontWeight.Bold)
                     Text("${history.positionMs / 60000} min watched", color = Muted)
@@ -364,43 +408,43 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             Spacer(Modifier.height(8.dp))
             if (account.email == null) Button(onClick = {
                 (context as? android.app.Activity)?.let { activity -> scope.launch { vm.cloud.signIn(activity) } }
-            }, enabled = account.configured && !account.busy) { Text(if (account.busy) "Signing in…" else "Sign in with Google") }
+            }, enabled = account.configured && !account.busy, modifier = Modifier.focusRing()) { Text(if (account.busy) "Signing in…" else "Sign in with Google") }
             else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.cloud.syncNow() }) { Text("Sync now") }
-                TextButton(onClick = { scope.launch { vm.cloud.signOut() } }) { Text("Sign out") }
+                Button(onClick = { vm.cloud.syncNow() }, modifier = Modifier.focusRing()) { Text("Sync now") }
+                TextButton(onClick = { scope.launch { vm.cloud.signOut() } }, modifier = Modifier.focusRing()) { Text("Sign out") }
             }
             if (!account.configured) Text("Google sign-in will become available after the app’s Firebase project is connected.", color = Muted, style = MaterialTheme.typography.bodySmall)
             Text("Signing in imports your guest watchlist and progress. Stream links and provider keys stay on this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(color = Slate, modifier = Modifier.padding(top = 16.dp))
         }
         item { SectionTitle("Make Brio yours", "A public movie and TV catalog is built in. TMDB and Real-Debrid are optional.") }
-        item { OutlinedTextField(tmdb, { tmdb = it }, label = { Text("TMDB read access token (optional)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(tmdb, { tmdb = it }, label = { Text("TMDB read access token (optional)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true) }
         item {
             Text("Leave this blank to use the public catalog. A TMDB token lets you use TMDB instead.", color = Muted)
-            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org/settings/api"))) }) { Text("Get a TMDB token →") }
+            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org/settings/api"))) }, modifier = Modifier.focusRing()) { Text("Get a TMDB token →") }
         }
         item { HorizontalDivider(color = Slate) }
         item { SectionTitle("Real-Debrid", "Optional. Play supported links and files in your account.") }
-        item { OutlinedTextField(debrid, { debrid = it }, label = { Text("Real-Debrid API token") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(debrid, { debrid = it }, label = { Text("Real-Debrid API token") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.connectDebrid(debrid) }, enabled = debrid.isNotBlank() && !state.debridLoading) { Text(if (state.debridLoading) "Connecting…" else "Verify account") }
-                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://real-debrid.com/apitoken"))) }) { Text("Get token →") }
+                Button(onClick = { vm.connectDebrid(debrid) }, enabled = debrid.isNotBlank() && !state.debridLoading, modifier = Modifier.focusRing()) { Text(if (state.debridLoading) "Connecting…" else "Verify account") }
+                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://real-debrid.com/apitoken"))) }, modifier = Modifier.focusRing()) { Text("Get token →") }
             }
             state.account?.let { Text("Connected: ${it.username} · ${it.type}\nExpires: ${it.expiration.take(10)}", color = Lime, modifier = Modifier.padding(top = 12.dp)) }
-            TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }) { Text("Disconnect Real-Debrid") }
+            TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }, modifier = Modifier.focusRing()) { Text("Disconnect Real-Debrid") }
         }
         item { HorizontalDivider(color = Slate) }
         item { SectionTitle("Stream provider", "Vixsrc is built in. Leave the field blank to use it, or enter another provider.") }
-        item { OutlinedTextField(provider, { provider = it }, label = { Text("Add-on manifest URL or HTTPS endpoint") }, placeholder = { Text("https://your-addon.example/manifest.json") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(provider, { provider = it }, label = { Text("Add-on manifest URL or HTTPS endpoint") }, placeholder = { Text("https://your-addon.example/manifest.json") }, modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true) }
         item { Text("Built-in Vixsrc resolves movie and episode links automatically. Availability depends on the provider. Custom add-ons must supply direct HTTPS video links.", color = Muted) }
-        item { Button(onClick = { vm.saveSettings(tmdb, provider, debrid) }, modifier = Modifier.fillMaxWidth()) { Text("Save settings") } }
+        item { Button(onClick = { vm.saveSettings(tmdb, provider, debrid) }, modifier = Modifier.fillMaxWidth().focusRing()) { Text("Save settings") } }
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.4.0 · Made for your next great watch", color = Muted)
+            Text("Brio 0.4.1 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }) { Text("The Movie Database →") }
+            TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }
     }
 }
@@ -408,7 +452,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             SectionTitle("Your Real-Debrid library", "Stream files from your connected account.")
-            TextButton(onClick = { vm.loadDebrid() }, enabled = !state.debridLoading) { Text(if (state.debridLoading) "Loading…" else "Refresh library") }
+            TextButton(onClick = { vm.loadDebrid() }, enabled = !state.debridLoading, modifier = Modifier.focusRing()) { Text(if (state.debridLoading) "Loading…" else "Refresh library") }
         }
         if (vm.store.debridToken.isBlank()) item { EmptyState("Connect Real-Debrid", "Add your API token in Settings to use your account.") }
         else {
@@ -422,16 +466,16 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             items(state.torrents, key = { "torrent:${it.id}" }) { torrent ->
                 FileButton(torrent.filename, "${torrent.status.replace('_', ' ')} · ${torrent.progress}%", torrent.status == "downloaded" && !state.debridLoading) { vm.openTorrent(torrent.id) }
             }
-            if (state.debridMore) item { TextButton(onClick = { vm.loadDebrid(true) }, enabled = !state.debridLoading) { Text("Load more") } }
+            if (state.debridMore) item { TextButton(onClick = { vm.loadDebrid(true) }, enabled = !state.debridLoading, modifier = Modifier.focusRing()) { Text("Load more") } }
         }
     }
     if (state.torrentFiles.isNotEmpty()) AlertDialog(onDismissRequest = vm::closeTorrent,
         title = { Text("Choose a file") }, text = { LazyColumn { items(state.torrentFiles) { file ->
-            TextButton(onClick = { vm.openLink(file.link, file.filename, true) { vm.closeTorrent(); play(it) } }, enabled = !state.resolving) { Text(file.filename) }
-        } } }, confirmButton = { TextButton(onClick = vm::closeTorrent) { Text("Close") } })
+            TextButton(onClick = { vm.openLink(file.link, file.filename, true) { vm.closeTorrent(); play(it) } }, enabled = !state.resolving, modifier = Modifier.focusRing()) { Text(file.filename) }
+        } } }, confirmButton = { TextButton(onClick = vm::closeTorrent, modifier = Modifier.focusRing()) { Text("Close") } })
 }
 @Composable private fun FileButton(name: String, subtitle: String, enabled: Boolean, click: () -> Unit) {
-    OutlinedButton(onClick = click, enabled = enabled, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+    OutlinedButton(onClick = click, enabled = enabled, modifier = Modifier.fillMaxWidth().focusRing(), shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {
             Text(name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -452,8 +496,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             }
             Text("Direct MP4, HLS, and DASH streams are supported.", color = Muted, style = MaterialTheme.typography.bodySmall)
         } },
-        confirmButton = { Button(onClick = { vm.openLink(url, name, debrid) { dismiss(); play(it) } }, enabled = url.isNotBlank() && !busy) { Text(if (busy) "Resolving…" else "▶ Play") } },
-        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+        confirmButton = { Button(onClick = { vm.openLink(url, name, debrid) { dismiss(); play(it) } }, enabled = url.isNotBlank() && !busy, modifier = Modifier.focusRing()) { Text(if (busy) "Resolving…" else "▶ Play") } },
+        dismissButton = { TextButton(onClick = dismiss, modifier = Modifier.focusRing()) { Text("Cancel") } })
 }
 @Composable private fun SectionTitle(title: String, subtitle: String) {
     Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -466,3 +510,4 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     }
 }
 @Composable private fun Busy() { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Lime) } }
+

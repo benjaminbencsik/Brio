@@ -13,8 +13,8 @@ android {
         applicationId = "com.bencsik.brio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 8
+        versionName = "0.4.1"
     }
     signingConfigs {
         getByName("debug") {
@@ -59,3 +59,4 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.6.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+

@@ -45,6 +45,17 @@ class MediaRepository(
         return get("$kind/popular", mapOf("page" to page.toString(), "language" to "en-US"))
             .getAsJsonArray("results").map { title(it.asJsonObject, kind) }
     }
+    suspend fun category(kind: String, genre: String, page: Int = 1): List<Title> {
+        require(kind == "movie" || kind == "tv")
+        val genres = if (kind == "movie") mapOf("Action" to 28, "Comedy" to 35, "Drama" to 18,
+            "Horror" to 27, "Sci-Fi" to 878, "Animation" to 16, "Crime" to 80, "Documentary" to 99)
+        else mapOf("Action" to 10759, "Comedy" to 35, "Drama" to 18,
+            "Sci-Fi" to 10765, "Animation" to 16, "Crime" to 80, "Documentary" to 99, "Reality-TV" to 10764)
+        val genreId = requireNotNull(genres[genre]) { "Unknown $kind category: $genre" }
+        return get("discover/$kind", mapOf("with_genres" to genreId.toString(), "page" to page.toString(),
+            "language" to "en-US", "sort_by" to "popularity.desc"))
+            .getAsJsonArray("results").map { title(it.asJsonObject, kind) }
+    }
     suspend fun search(query: String, page: Int = 1): List<Title> =
         get("search/multi", mapOf("query" to query, "page" to page.toString(), "include_adult" to "false"))
             .getAsJsonArray("results").mapNotNull {
@@ -117,3 +128,4 @@ class JsonStreamProvider(
 }
 private fun JsonObject.text(key: String): String = get(key)?.takeUnless { it.isJsonNull }?.asString.orEmpty()
 private fun JsonObject.number(key: String): Int = get(key)?.takeUnless { it.isJsonNull }?.asInt ?: 0
+

@@ -95,20 +95,19 @@ class PlayerActivity : ComponentActivity() {
                             requestFocus()
                         }
                     }, update = { it.player = player }, modifier = Modifier.fillMaxSize())
-                    if (showActions) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp)) { Text("← ${playback.label}", color = Color.White) }
+                    if (showActions) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
                     val actions = skipActions(stream, position, duration)
                     val intro = actions.introTargetMs != null
                     val credits = actions.inCredits
-                    if (!connecting && (intro || credits || showActions || finished)) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = if (showActions) 110.dp else 36.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (intro) Button(onClick = { seek(actions.introTargetMs!!) }) { Text("Skip intro") }
-                        else if (showActions && !credits && !finished) OutlinedButton(onClick = { seek(position + 90000) }) { Text("Skip 90 seconds") }
-                        if (next != null && (credits || finished || showActions)) Button(onClick = ::playNext, enabled = !nextLoading) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
-                        else if (credits && actions.creditsTargetMs != null) Button(onClick = { seek(actions.creditsTargetMs!!) }) { Text("Skip credits") }
+                    if (!connecting && (intro || credits || (next != null && (finished || showActions)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = if (showActions) 110.dp else 36.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (intro) Button(onClick = { seek(actions.introTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip intro") }
+                        if (credits && actions.creditsTargetMs != null) OutlinedButton(onClick = { seek(actions.creditsTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip credits") }
+                        if (next != null && (credits || finished || showActions)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
                     }
                     if (connecting) {
                         Box(Modifier.fillMaxSize().background(Color.Black)) {
-                            TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).padding(20.dp)) { Text("← Back", color = Color.White) }
+                            TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).padding(20.dp).focusRing()) { Text("← Back", color = Color.White) }
                             if (countdown > 0) Text("Next server in ${countdown}s", color = Color.White,
                                 modifier = Modifier.align(Alignment.TopEnd).padding(24.dp))
                             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -116,24 +115,24 @@ class PlayerActivity : ComponentActivity() {
                                 CircularProgressIndicator()
                                 Text(if (countdown > 0) "Trying another server…" else "Connecting to server ${serverIndex + 1}…", color = Color.White)
                                 Text("Looking for a working server. You can also choose one below.", color = Color.LightGray)
-                                OutlinedButton(onClick = { serverPicker = true }) { Text("Try different server") }
+                                OutlinedButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Try different server") }
                             }
                         }
                     } else if (showActions) {
-                        TextButton(onClick = { serverPicker = true }, modifier = Modifier.align(Alignment.TopEnd).padding(20.dp)) { Text("Servers") }
+                        TextButton(onClick = { serverPicker = true }, modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).focusRing()) { Text("Servers") }
                     }
                     if (serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
                         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             itemsIndexed(servers) { index, source ->
-                                TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }) {
+                                TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }, modifier = Modifier.focusRing()) {
                                     Text("${index + 1}. ${source.name} · ${source.quality}")
                                 }
                             }
-                        } }, confirmButton = { TextButton(onClick = { serverPicker = false }) { Text("Close") } })
+                        } }, confirmButton = { TextButton(onClick = { serverPicker = false }, modifier = Modifier.focusRing()) { Text("Close") } })
                     error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
-                            confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }) { Text("Retry") } },
-                            dismissButton = { TextButton(onClick = { finish() }) { Text("Back to sources") } })
+                            confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
+                            dismissButton = { TextButton(onClick = { finish() }, modifier = Modifier.focusRing()) { Text("Back to sources") } })
                     }
                 }
             }
@@ -143,7 +142,7 @@ class PlayerActivity : ComponentActivity() {
                 exo?.let { player ->
                     position = player.currentPosition
                     duration = player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0) ?: 0
-                    if (position > 0 && position / 1000 % 10 == 0L) save()
+                    if (player.isPlaying && position > 0 && position / 1000 % 10 == 0L) save()
                 }
                 delay(1000)
             }
@@ -233,6 +232,7 @@ class PlayerActivity : ComponentActivity() {
                         Player.STATE_BUFFERING -> armTimeout(generation)
                         Player.STATE_READY, Player.STATE_ENDED -> {
                             timeoutJob?.cancel(); connecting = false; countdown = 0
+                            if (playbackState == Player.STATE_ENDED) save()
                         }
                     }
                 }
@@ -292,3 +292,4 @@ class PlayerActivity : ComponentActivity() {
         return super.onKeyDown(keyCode, event)
     }
 }
+
