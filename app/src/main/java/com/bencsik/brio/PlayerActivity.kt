@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -112,7 +113,7 @@ class PlayerActivity : ComponentActivity() {
                             playerView = this
                             requestFocus()
                         }
-                    }, update = { it.player = player }, modifier = Modifier.fillMaxSize().focusable())
+                    }, update = { it.player = player }, modifier = Modifier.fillMaxSize().focusable().onKeyEvent { handlePlayerKey(it.nativeKeyEvent) })
                     if (showActions) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
                     val actions = skipActions(stream, position, duration)
@@ -317,7 +318,7 @@ class PlayerActivity : ComponentActivity() {
             finally { loadingNext = false; nextLoading = false }
         }
     }
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    private fun handlePlayerKey(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
         val select = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (select && (selectingPlayback || (!showActions && !connecting && !serverPicker && error == null))) {
@@ -335,9 +336,10 @@ class PlayerActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_DOWN) revealControls()
             if (playerView?.dispatchKeyEvent(event) == true) return true
         }
-        return super.dispatchKeyEvent(event)
+        return false
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (handlePlayerKey(event)) return true
         if (keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER)) revealControls()
         when (keyCode) {
@@ -348,6 +350,10 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_MEDIA_REWIND -> { seek(position - 10000); return true }
         }
         return super.onKeyDown(keyCode, event)
+    }
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (handlePlayerKey(event)) return true
+        return super.onKeyUp(keyCode, event)
     }
 }
 
