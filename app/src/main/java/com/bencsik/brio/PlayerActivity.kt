@@ -3,8 +3,10 @@ package com.bencsik.brio
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -46,6 +48,7 @@ class PlayerActivity : ComponentActivity() {
     private var position by mutableLongStateOf(0)
     private var duration by mutableLongStateOf(0)
     private var showActions by mutableStateOf(true)
+    private var selectingPlayback = false
     private var controlsTimer: Job? = null
     private var error by mutableStateOf<String?>(null)
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
@@ -71,6 +74,17 @@ class PlayerActivity : ComponentActivity() {
         val parsed = runCatching { Gson().fromJson(intent.getStringExtra("playback"), Playback::class.java) }.getOrNull()
         if (parsed == null) { finish(); return }
         playback = savedInstanceState?.getString("playback")?.let { Gson().fromJson(it, Playback::class.java) } ?: parsed
+        onBackPressedDispatcher.addCallback(this) {
+            when {
+                serverPicker -> serverPicker = false
+                error != null -> error = null
+                !connecting && !showActions -> {
+                    revealControls()
+                    playerView?.showController()
+                }
+                else -> finish()
+            }
+        }
         servers = (listOf(playback.stream) + playback.alternatives.orEmpty()).distinctBy { it.url to it.headers }
         resumePosition = savedInstanceState?.getLong("position") ?: store.history().firstOrNull { it.playback.key == playback.key }?.let {
             if (it.durationMs > 0 && it.positionMs >= it.durationMs - 5000) 0L else it.positionMs
@@ -98,7 +112,7 @@ class PlayerActivity : ComponentActivity() {
                             playerView = this
                             requestFocus()
                         }
-                    }, update = { it.player = player }, modifier = Modifier.fillMaxSize())
+                    }, update = { it.player = player }, modifier = Modifier.fillMaxSize().focusable())
                     if (showActions) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
                     val actions = skipActions(stream, position, duration)
@@ -302,6 +316,26 @@ class PlayerActivity : ComponentActivity() {
             } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Couldn't load the next episode." }
             finally { loadingNext = false; nextLoading = false }
         }
+    }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val keyCode = event.keyCode
+        val select = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+        if (select && (selectingPlayback || (!showActions && !connecting && !serverPicker && error == null))) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                selectingPlayback = true
+                exo?.let { if (it.isPlaying) it.pause() else it.play() }
+                revealControls()
+                playerView?.showController()
+            } else if (event.action == KeyEvent.ACTION_UP) selectingPlayback = false
+            return true
+        }
+        if (!connecting && !serverPicker && error == null && playerView?.hasFocus() == true &&
+            keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER)) {
+            if (event.action == KeyEvent.ACTION_DOWN) revealControls()
+            if (playerView?.dispatchKeyEvent(event) == true) return true
+        }
+        return super.dispatchKeyEvent(event)
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,

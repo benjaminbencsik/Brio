@@ -12,9 +12,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -70,7 +73,9 @@ class MainActivity : ComponentActivity() {
         val television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Lime, onPrimary = Night, background = Night, surface = Slate, onSurface = Color.White, secondary = Lime)) {
-                BrioApp(vm, television, sharedLink, { sharedLink = "" }, ::play, { openFile.launch(arrayOf("video/*", "audio/*")) })
+                TvScrollFocus(television) {
+                    BrioApp(vm, television, sharedLink, { sharedLink = "" }, ::play, { openFile.launch(arrayOf("video/*", "audio/*")) })
+                }
             }
         }
     }
@@ -83,6 +88,22 @@ class MainActivity : ComponentActivity() {
         if (playback.stream.url.isBlank()) { vm.resumeCloud(playback, ::play); return }
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("playback", Gson().toJson(playback)))
     }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TvScrollFocus(enabled: Boolean, content: @Composable () -> Unit) {
+    if (!enabled) { content(); return }
+    val focusPosition = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                if (size >= containerSize) return 0f
+                val target = (containerSize * 0.18f).coerceAtMost(containerSize - size)
+                return offset - target
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides focusPosition, content = content)
 }
 
 @Composable
@@ -457,7 +478,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         item {
             HorizontalDivider(color = Slate)
             Spacer(Modifier.height(16.dp))
-            Text("Brio 0.4.2 · Made for your next great watch", color = Muted)
+            Text("Brio 0.4.3 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }
