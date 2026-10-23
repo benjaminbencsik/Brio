@@ -1,7 +1,15 @@
 package com.bencsik.brio
 
+import android.app.PictureInPictureParams
+import android.app.UiModeManager
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.view.KeyEvent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
@@ -31,6 +39,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import com.bencsik.brio.core.*
 import com.google.gson.Gson
@@ -45,7 +54,10 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var playback: Playback
     private lateinit var store: BrioStore
     private var exo by mutableStateOf<ExoPlayer?>(null)
+    private var mediaSession: MediaSession? = null
     private var playerView: PlayerView? = null
+    private var pipMode by mutableStateOf(false)
+    private var pipSupported = false
     private var position by mutableLongStateOf(0)
     private var duration by mutableLongStateOf(0)
     private var showActions by mutableStateOf(true)
@@ -75,6 +87,9 @@ class PlayerActivity : ComponentActivity() {
         val parsed = runCatching { Gson().fromJson(intent.getStringExtra("playback"), Playback::class.java) }.getOrNull()
         if (parsed == null) { finish(); return }
         playback = savedInstanceState?.getString("playback")?.let { Gson().fromJson(it, Playback::class.java) } ?: parsed
+        val television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        pipSupported = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
+            (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
                 serverPicker -> serverPicker = false
@@ -103,32 +118,38 @@ class PlayerActivity : ComponentActivity() {
                         PlayerView(context).apply {
                             this.player = player
                             keepScreenOn = true
+                            useController = !pipMode
                             controllerShowTimeoutMs = 4000
                             setShowSubtitleButton(true)
                             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                             setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-                                if (visibility == android.view.View.VISIBLE) revealControls()
+                                if (visibility == android.view.View.VISIBLE && !pipMode) revealControls()
                                 else { showActions = false; controlsTimer?.cancel() }
                             })
                             playerView = this
                             requestFocus()
                         }
-                    }, update = { it.player = player }, modifier = Modifier.fillMaxSize().focusable().onKeyEvent { handlePlayerKey(it.nativeKeyEvent) })
-                    if (showActions) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
+                    }, update = {
+                        it.player = player
+                        it.useController = !pipMode
+                    }, modifier = Modifier.fillMaxSize().focusable().onKeyEvent { handlePlayerKey(it.nativeKeyEvent) })
+                    if (showActions && !pipMode) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
                     val actions = skipActions(stream, position, duration)
                     val intro = actions.introTargetMs != null
                     val credits = actions.inCredits
                     val nearEnd = duration > 0 && position > 0 && duration - position <= 120000
                     LaunchedEffect(intro, credits, nearEnd, finished) {
-                        if (intro || credits || (next != null && (nearEnd || finished))) revealControls()
+                        if (!pipMode && (intro || credits || (next != null && (nearEnd || finished)))) revealControls()
                     }
-                    if (!connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (intro) Button(onClick = { seek(actions.introTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip intro") }
                         if (credits && actions.creditsTargetMs != null) OutlinedButton(onClick = { seek(actions.creditsTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip credits") }
                         if (next != null && (credits || nearEnd || finished)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
                     }
-                    if (connecting) {
+                    if (pipMode) {
+                        // Only the video surface remains visible in the system PiP window.
+                    } else if (connecting) {
                         Box(Modifier.fillMaxSize().background(Color.Black)) {
                             TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).padding(20.dp).focusRing()) { Text("← Back", color = Color.White) }
                             if (countdown > 0) Text("Next server in ${countdown}s", color = Color.White,
@@ -142,9 +163,14 @@ class PlayerActivity : ComponentActivity() {
                             }
                         }
                     } else if (showActions) {
-                        TextButton(onClick = { serverPicker = true }, modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).focusRing()) { Text("Servers") }
+                        Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
+                            horizontalAlignment = Alignment.End) {
+                            TextButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Servers") }
+                            if (pipSupported && exo?.playbackState == Player.STATE_READY)
+                                OutlinedButton(onClick = ::minimize, modifier = Modifier.focusRing()) { Text("▣ Minimize") }
+                        }
                     }
-                    if (serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
+                    if (!pipMode && serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
                         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             itemsIndexed(servers) { index, source ->
                                 TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }, modifier = Modifier.focusRing()) {
@@ -152,7 +178,7 @@ class PlayerActivity : ComponentActivity() {
                                 }
                             }
                         } }, confirmButton = { TextButton(onClick = { serverPicker = false }, modifier = Modifier.focusRing()) { Text("Close") } })
-                    error?.let { message ->
+                    if (!pipMode) error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
                             confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
                             dismissButton = { TextButton(onClick = { finish() }, modifier = Modifier.focusRing()) { Text("Back to sources") } })
@@ -173,12 +199,19 @@ class PlayerActivity : ComponentActivity() {
         loadNextInfo()
     }
     override fun onStart() { super.onStart(); startPlayer() }
+    override fun onPictureInPictureModeChanged(inPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(inPictureInPictureMode, newConfig)
+        pipMode = inPictureInPictureMode
+        if (inPictureInPictureMode) {
+            showActions = false; controlsTimer?.cancel(); playerView?.hideController()
+        } else revealControls()
+    }
     override fun onStop() {
         controlsTimer?.cancel()
         connectionGeneration++
         connectionJob?.cancel(); timeoutJob?.cancel()
-        exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save(); it.release() }
-        exo = null; playerView?.player = null
+        exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
+        releasePlayer()
         FirebaseLibrary.get(this).syncNow()
         super.onStop()
     }
@@ -193,8 +226,8 @@ class PlayerActivity : ComponentActivity() {
     private fun tryServer(index: Int) {
         connectionJob?.cancel(); timeoutJob?.cancel()
         val generation = ++connectionGeneration
-        exo?.let { resumePosition = it.currentPosition; save(); it.release() }
-        exo = null; playerView?.player = null
+        exo?.let { resumePosition = it.currentPosition; save() }
+        releasePlayer()
         serverIndex = index; attemptedServers.add(index)
         connecting = true; countdown = 0; error = null; finished = false
         connectionJob = lifecycleScope.launch {
@@ -222,7 +255,7 @@ class PlayerActivity : ComponentActivity() {
         timeoutJob?.cancel()
         // Invalidate callbacks from this failed player before releasing it.
         val failedGeneration = ++connectionGeneration
-        exo?.let { resumePosition = it.currentPosition; it.release() }; exo = null; playerView?.player = null
+        exo?.let { resumePosition = it.currentPosition }; releasePlayer()
         val nextServer = nextUntriedServer(servers.size, serverIndex, attemptedServers)
         if (nextServer == null) {
             connecting = false; countdown = 0
@@ -244,6 +277,7 @@ class PlayerActivity : ComponentActivity() {
         val data = DefaultDataSource.Factory(this, http)
         val player = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(data)).build()
         exo = player
+        mediaSession = MediaSession.Builder(this, player).build()
         player.apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
             setHandleAudioBecomingNoisy(true)
@@ -256,7 +290,7 @@ class PlayerActivity : ComponentActivity() {
                         Player.STATE_BUFFERING -> armTimeout(generation)
                         Player.STATE_READY, Player.STATE_ENDED -> {
                             timeoutJob?.cancel(); connecting = false; countdown = 0
-                            if (playbackState == Player.STATE_READY) revealControls()
+                            if (playbackState == Player.STATE_READY && !pipMode) revealControls()
                             if (playbackState == Player.STATE_ENDED) save()
                         }
                     }
@@ -269,6 +303,30 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private fun save() { exo?.let { player -> store.saveProgress(playback, player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0) } }
+    private fun releasePlayer() {
+        mediaSession?.release(); mediaSession = null
+        playerView?.player = null
+        exo?.release(); exo = null
+    }
+    private fun minimize() {
+        if (!pipSupported || connecting || error != null || exo?.playbackState != Player.STATE_READY) return
+        val source = Rect()
+        playerView?.getGlobalVisibleRect(source)
+        val params = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).apply {
+            if (!source.isEmpty) setSourceRectHint(source)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                setTitle(playback.title.name)
+                setSubtitle(playback.label)
+            }
+        }.build()
+        pipMode = true
+        showActions = false; controlsTimer?.cancel(); playerView?.hideController()
+        val entered = runCatching { enterPictureInPictureMode(params) }.getOrDefault(false)
+        if (!entered) {
+            pipMode = false; revealControls()
+            Toast.makeText(this, "Picture-in-picture isn't available on this device.", Toast.LENGTH_SHORT).show()
+        }
+    }
     private fun revealControls() {
         showActions = true
         controlsTimer?.cancel()
@@ -308,7 +366,7 @@ class PlayerActivity : ComponentActivity() {
                 val streams = resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
                 check(streams.isNotEmpty()) { "No streams are available for the next episode. Return to the catalog to choose another source." }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
-                save(); exo?.release(); exo = null
+                save(); releasePlayer()
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
                 resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false
