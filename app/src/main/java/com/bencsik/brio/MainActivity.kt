@@ -491,13 +491,25 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         text = { Text("This removes saved progress and Continue Watching entries from your library.") },
         confirmButton = { TextButton(onClick = { vm.store.clearHistory(); vm.refreshLibrary(); confirmClear = false }, modifier = Modifier.focusRing()) { Text("Clear history") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }, modifier = Modifier.focusRing()) { Text("Cancel") } })
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val sideRail = maxWidth >= 720.dp
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    if (sideRail) Column(Modifier.width(160.dp).padding(top = 80.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        sections.forEach { choice ->
+            TextButton(onClick = { section = choice }, modifier = Modifier.fillMaxWidth().focusRing()
+                .background(if (section == choice) Slate else Color.Transparent, RoundedCornerShape(10.dp)),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+                Text(choice, modifier = Modifier.fillMaxWidth(), color = if (section == choice) Color.White else Muted)
+            }
+        }
+    }
+    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             Text("Settings", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(top = 18.dp, bottom = 10.dp))
             HorizontalDivider(color = Color(0xFF303947))
         }
-        item {
+        if (!sideRail) item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(sections) { choice ->
                     val selected = section == choice
@@ -587,6 +599,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }
+    }
+    }
     }
 }
 @Composable private fun SettingsPanel(title: String, description: String, content: @Composable ColumnScope.() -> Unit) {
