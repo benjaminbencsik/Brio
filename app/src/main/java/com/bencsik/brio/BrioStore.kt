@@ -57,6 +57,15 @@ class BrioStore(context: Context) {
     var provider: String
         get() = secret("provider")
         set(value) = putSecret("provider", value.trim())
+    var showContinueOnHome: Boolean
+        get() = prefs.getBoolean("show_continue_home", true)
+        set(value) { prefs.edit().putBoolean("show_continue_home", value).apply() }
+    var autoplayNext: Boolean
+        get() = prefs.getBoolean("autoplay_next", false)
+        set(value) { prefs.edit().putBoolean("autoplay_next", value).apply() }
+    var autoSkipIntro: Boolean
+        get() = prefs.getBoolean("auto_skip_intro", false)
+        set(value) { prefs.edit().putBoolean("auto_skip_intro", value).apply() }
     fun watchlist(): List<Title> = runCatching {
         gson.fromJson<List<Title>>(secret("watchlist").ifEmpty { "[]" }, object : TypeToken<List<Title>>() {}.type)
     }.getOrDefault(emptyList())
@@ -147,3 +156,4 @@ class BrioStore(context: Context) {
         return { prefs.unregisterOnSharedPreferenceChangeListener(observer) }
     }
 }
+

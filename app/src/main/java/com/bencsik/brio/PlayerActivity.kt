@@ -67,6 +67,7 @@ class PlayerActivity : ComponentActivity() {
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
     private var nextLoading by mutableStateOf(false)
     private var finished by mutableStateOf(false)
+    private var introSkipped = false
     private var resumePosition = 0L
     private var resumePlay = true
     private var loadingNext = false
@@ -139,6 +140,13 @@ class PlayerActivity : ComponentActivity() {
                     val intro = actions.introTargetMs != null
                     val credits = actions.inCredits
                     val nearEnd = duration > 0 && position > 0 && duration - position <= 120000
+                    LaunchedEffect(stream.url, actions.introTargetMs) {
+                        val target = actions.introTargetMs
+                        if (store.autoSkipIntro && !introSkipped && target != null && !connecting) {
+                            introSkipped = true
+                            seek(target)
+                        }
+                    }
                     LaunchedEffect(intro, credits, nearEnd, finished) {
                         if (!pipMode && (intro || credits || (next != null && (nearEnd || finished)))) revealControls()
                     }
@@ -229,7 +237,7 @@ class PlayerActivity : ComponentActivity() {
         exo?.let { resumePosition = it.currentPosition; save() }
         releasePlayer()
         serverIndex = index; attemptedServers.add(index)
-        connecting = true; countdown = 0; error = null; finished = false
+        connecting = true; countdown = 0; error = null; finished = false; introSkipped = false
         connectionJob = lifecycleScope.launch {
             try {
                 val source = withTimeout(20000) { prepareStream(servers[index], store.debridToken) }
@@ -291,7 +299,10 @@ class PlayerActivity : ComponentActivity() {
                         Player.STATE_READY, Player.STATE_ENDED -> {
                             timeoutJob?.cancel(); connecting = false; countdown = 0
                             if (playbackState == Player.STATE_READY && !pipMode) revealControls()
-                            if (playbackState == Player.STATE_ENDED) save()
+                            if (playbackState == Player.STATE_ENDED) {
+                                save()
+                                if (store.autoplayNext && next != null) playNext()
+                            }
                         }
                     }
                 }
@@ -369,7 +380,7 @@ class PlayerActivity : ComponentActivity() {
                 save(); releasePlayer()
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
-                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false
+                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) startPlayer()
                 loadNextInfo()
             } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Couldn't load the next episode." }

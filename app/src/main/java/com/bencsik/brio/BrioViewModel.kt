@@ -273,7 +273,8 @@ val MOVIE_CATEGORIES = listOf("Popular Movies" to null, "Action" to "Action", "C
 val TV_CATEGORIES = listOf("Popular TV Shows" to null, "Action" to "Action", "Comedy" to "Comedy",
     "Drama" to "Drama", "Crime" to "Crime", "Sci-Fi" to "Sci-Fi", "Animation" to "Animation", "Documentary" to "Documentary")
 val HOME_SHELVES = listOf(
-    Triple("Popular TV Shows", "tv", null), Triple("Action Movies", "movie", "Action"),
+    Triple("Trending series", "tv", null), Triple("Action Movies", "movie", "Action"),
     Triple("Comedy TV Shows", "tv", "Comedy"), Triple("Drama Movies", "movie", "Drama"),
-    Triple("Sci-Fi TV Shows", "tv", "Sci-Fi"), Triple("Horror Movies", "movie", "Horror"))
+    Triple("Sci-Fi TV Shows", "tv", "Sci-Fi"), Triple("Horror Movies", "movie", "Horror"),
+    Triple("Crime series", "tv", "Crime"), Triple("Animated movies", "movie", "Animation"))
 
