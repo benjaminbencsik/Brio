@@ -477,6 +477,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     val context = androidx.compose.ui.platform.LocalContext.current
     val account by vm.cloud.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    var emailInput by rememberSaveable { mutableStateOf("") }
+    var codeInput by rememberSaveable { mutableStateOf("") }
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
     var provider by remember { mutableStateOf(vm.store.provider) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
@@ -544,19 +546,38 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             } }
         }
         if (section == "Account") item {
-            SectionTitle("Your account", "Sign in with Google to sync your watchlist and viewing progress across devices.")
+            SectionTitle("Your account", "Use an email code to sync your watchlist and viewing progress across devices.")
             Spacer(Modifier.height(12.dp))
             account.email?.let { Text(it, color = Lime) }
             Text(account.status, color = Muted)
-            Spacer(Modifier.height(8.dp))
-            if (account.email == null) Button(onClick = {
-                (context as? android.app.Activity)?.let { activity -> scope.launch { vm.cloud.signIn(activity) } }
-            }, enabled = account.configured && !account.busy, modifier = Modifier.focusRing()) { Text(if (account.busy) "Signing in…" else "Sign in with Google") }
-            else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(12.dp))
+            if (account.email == null && account.pendingEmail == null) {
+                OutlinedTextField(emailInput, { emailInput = it }, label = { Text("Email address") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth().focusRing(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = { scope.launch { vm.cloud.sendCode(emailInput) } },
+                    enabled = account.configured && !account.busy && emailInput.isNotBlank(), modifier = Modifier.focusRing()) {
+                    Text(if (account.busy) "Sending…" else "Email me a code")
+                }
+            } else if (account.email == null) {
+                Text("Code sent to ${account.pendingEmail}", color = Muted)
+                OutlinedTextField(codeInput, { codeInput = it.filter(Char::isDigit).take(6) },
+                    label = { Text("Six-digit code") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().focusRing(),
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword,
+                        imeAction = ImeAction.Done))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { scope.launch { vm.cloud.verifyCode(codeInput) } },
+                        enabled = !account.busy && codeInput.length == 6, modifier = Modifier.focusRing()) { Text("Sign in") }
+                    TextButton(onClick = { scope.launch { vm.cloud.sendCode(emailInput.ifBlank { account.pendingEmail.orEmpty() }) } },
+                        enabled = !account.busy, modifier = Modifier.focusRing()) { Text("Resend") }
+                }
+            } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { vm.cloud.syncNow() }, modifier = Modifier.focusRing()) { Text("Sync now") }
                 TextButton(onClick = { scope.launch { vm.cloud.signOut() } }, modifier = Modifier.focusRing()) { Text("Sign out") }
             }
-            if (!account.configured) Text("Google sign-in will become available after the app’s Firebase project is connected.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (!account.configured) Text("Email sign-in will be available after Brio's cloud project is connected.", color = Muted, style = MaterialTheme.typography.bodySmall)
             Text("Signing in imports your guest watchlist and progress. Stream links and provider keys stay on this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(color = Slate, modifier = Modifier.padding(top = 16.dp))
         }
@@ -591,11 +612,11 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         if (section == "Your data") item { SettingsPanel("Viewing activity", "Manage progress saved in Brio.") {
             Text("${state.history.size} saved plays · ${state.watchlist.size} titles in My List", color = Muted)
             OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.focusRing()) { Text("Clear viewing history") }
-            Text("Signed-in library changes sync when your account is connected.", color = Muted,
+            Text("Signed-in library changes sync when your email account is connected.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.0 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.1 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }

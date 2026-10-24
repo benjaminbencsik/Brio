@@ -57,6 +57,10 @@ class BrioStore(context: Context) {
     var provider: String
         get() = secret("provider")
         set(value) = putSecret("provider", value.trim())
+    /** Email-cloud session is encrypted with the same device-bound Android Keystore key. */
+    var emailCloudSession: String
+        get() = secret("email_cloud_session")
+        set(value) = putSecret("email_cloud_session", value)
     var showContinueOnHome: Boolean
         get() = prefs.getBoolean("show_continue_home", true)
         set(value) { prefs.edit().putBoolean("show_continue_home", value).apply() }

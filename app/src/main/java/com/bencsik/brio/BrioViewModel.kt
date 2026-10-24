@@ -28,7 +28,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     private var lastQuery = ""
     private var lastKind = "movie"
     private var lastGenre: String? = null
-    val cloud = FirebaseLibrary.get(application)
+    val cloud = EmailLibrary.get(application)
     private val stopLibraryObserver = store.observeLibrary { refreshLibrary() }
     init { reload(); loadHomeRows() }
     override fun onCleared() { stopLibraryObserver(); super.onCleared() }

@@ -49,6 +49,6 @@ Intro/credits timestamps are content-specific. Brio does not guess them or promi
 - `app`: Adaptive Compose interface, encrypted persistence, and lifecycle-managed Media3 player.
 - `.github/workflows/android.yml`: APK, lint, and test automation.
 
-No ads, analytics, cloud sync, background downloading, or DRM integrations are included in this first version. Playback stops when the app leaves the foreground. Each device stores its own settings and library.
+No ads or analytics. Email-code account sync is available after the app owner completes [cloud setup](docs/EMAIL_SIGNIN_SETUP.md). The public catalog works without sign-in. Provider keys and stream links stay on each device.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB. Blender sample films retain their creators' licensing and credits. Real-Debrid and TMDB are external services and are not affiliated with Brio.

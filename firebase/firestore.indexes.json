@@ -1,6 +1,0 @@
-{
-  "indexes": [],
-  "fieldOverrides": [
-    { "collectionGroup": "library", "fieldPath": "record", "indexes": [] }
-  ]
-}
