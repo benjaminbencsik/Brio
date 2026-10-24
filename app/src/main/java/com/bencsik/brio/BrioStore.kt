@@ -57,10 +57,6 @@ class BrioStore(context: Context) {
     var provider: String
         get() = secret("provider")
         set(value) = putSecret("provider", value.trim())
-    /** Email-cloud session is encrypted with the same device-bound Android Keystore key. */
-    var emailCloudSession: String
-        get() = secret("email_cloud_session")
-        set(value) = putSecret("email_cloud_session", value)
     var showContinueOnHome: Boolean
         get() = prefs.getBoolean("show_continue_home", true)
         set(value) { prefs.edit().putBoolean("show_continue_home", value).apply() }
@@ -100,6 +96,14 @@ class BrioStore(context: Context) {
         prefs.edit().remove(storageName("history")).apply()
     }
     fun libraryAccount(): String? = prefs.getString("library_account", null)
+    /** Bring a library from an older account-backed build into the device library. */
+    fun migrateToDeviceLibrary() {
+        if (libraryAccount() == null) return
+        val records = cloudRecords()
+        switchAccount(null)
+        applyCloud(records)
+        putSecret("email_cloud_session", "")
+    }
     fun switchAccount(uid: String?) {
         if (uid == libraryAccount()) return
         // Import only the guest library, never the previously connected account.

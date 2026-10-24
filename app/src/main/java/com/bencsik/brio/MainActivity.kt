@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
     private fun readSharedLink(intent: Intent) {
         if (intent.action == Intent.ACTION_SEND) sharedLink = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
     }
-    override fun onResume() { super.onResume(); vm.refreshLibrary(); vm.cloud.syncNow() }
+    override fun onResume() { super.onResume(); vm.refreshLibrary() }
     private fun play(playback: Playback) {
         if (playback.stream.url.isBlank()) { vm.resumeCloud(playback, ::play); return }
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("playback", Gson().toJson(playback)))
@@ -475,10 +475,10 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 }
 @Composable private fun SettingsScreen(vm: BrioViewModel, state: UiState) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val account by vm.cloud.state.collectAsStateWithLifecycle()
+    val pairing by vm.pairing.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var emailInput by rememberSaveable { mutableStateOf("") }
     var codeInput by rememberSaveable { mutableStateOf("") }
+    var addressInput by rememberSaveable { mutableStateOf("") }
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
     var provider by remember { mutableStateOf(vm.store.provider) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
@@ -487,7 +487,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var autoplay by remember { mutableStateOf(vm.store.autoplayNext) }
     var autoIntro by remember { mutableStateOf(vm.store.autoSkipIntro) }
     var confirmClear by remember { mutableStateOf(false) }
-    val sections = listOf("Experience", "Playback", "Account", "Sources", "Your data", "About")
+    val sections = listOf("Experience", "Playback", "Devices", "Sources", "Your data", "About")
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false },
         title = { Text("Clear viewing history?") },
         text = { Text("This removes saved progress and Continue Watching entries from your library.") },
@@ -545,41 +545,33 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 Text("Skip credits, next episode, and server selection remain available in the player.", color = Muted)
             } }
         }
-        if (section == "Account") item {
-            SectionTitle("Your account", "Use an email code to sync your watchlist and viewing progress across devices.")
-            Spacer(Modifier.height(12.dp))
-            account.email?.let { Text(it, color = Lime) }
-            Text(account.status, color = Muted)
-            Spacer(Modifier.height(12.dp))
-            if (account.email == null && account.pendingEmail == null) {
-                OutlinedTextField(emailInput, { emailInput = it }, label = { Text("Email address") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().focusRing(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
-                Spacer(Modifier.height(10.dp))
-                Button(onClick = { scope.launch { vm.cloud.sendCode(emailInput) } },
-                    enabled = account.configured && !account.busy && emailInput.isNotBlank(), modifier = Modifier.focusRing()) {
-                    Text(if (account.busy) "Sending…" else "Email me a code")
+        if (section == "Devices") item {
+            SettingsPanel("Sync devices", "Transfer your watchlist and viewing progress between Brio devices on the same Wi-Fi.") {
+                Text("On the device with your library, show a code. On the other device, enter that code below. Keep both apps open until sync finishes.", color = Muted)
+                if (pairing.code == null) {
+                    Button(onClick = { vm.pairing.startOffer() }, modifier = Modifier.focusRing()) { Text("Show pairing code") }
+                } else {
+                    Text(pairing.code.orEmpty(), style = MaterialTheme.typography.headlineLarge, color = Lime, fontWeight = FontWeight.Black)
+                    pairing.address?.let { Text("If the code alone can't find this device, enter $it on the other device too.", color = Muted) }
+                    TextButton(onClick = { vm.pairing.stopOffer() }, modifier = Modifier.focusRing()) { Text("Cancel code") }
                 }
-            } else if (account.email == null) {
-                Text("Code sent to ${account.pendingEmail}", color = Muted)
+                HorizontalDivider(color = Slate)
                 OutlinedTextField(codeInput, { codeInput = it.filter(Char::isDigit).take(6) },
-                    label = { Text("Six-digit code") }, singleLine = true,
+                    label = { Text("Code from your other device") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().focusRing(),
-                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                         imeAction = ImeAction.Done))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { scope.launch { vm.cloud.verifyCode(codeInput) } },
-                        enabled = !account.busy && codeInput.length == 6, modifier = Modifier.focusRing()) { Text("Sign in") }
-                    TextButton(onClick = { scope.launch { vm.cloud.sendCode(emailInput.ifBlank { account.pendingEmail.orEmpty() }) } },
-                        enabled = !account.busy, modifier = Modifier.focusRing()) { Text("Resend") }
+                OutlinedTextField(addressInput, { addressInput = it },
+                    label = { Text("IP:port (only if discovery fails)") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().focusRing())
+                Button(onClick = { scope.launch { vm.pairing.connect(codeInput, addressInput) } },
+                    enabled = !pairing.busy && codeInput.length == 6, modifier = Modifier.focusRing()) {
+                    Text(if (pairing.busy) "Connecting…" else "Sync with code")
                 }
-            } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.cloud.syncNow() }, modifier = Modifier.focusRing()) { Text("Sync now") }
-                TextButton(onClick = { scope.launch { vm.cloud.signOut() } }, modifier = Modifier.focusRing()) { Text("Sign out") }
+                Text(pairing.status, color = Muted)
+                Text("This is a manual transfer, not an ongoing sign-in. Repeat when you want to sync again. Provider keys and video links stay on each device.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            if (!account.configured) Text("Email sign-in will be available after Brio's cloud project is connected.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text("Signing in imports your guest watchlist and progress. Stream links and provider keys stay on this device.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            HorizontalDivider(color = Slate, modifier = Modifier.padding(top = 16.dp))
         }
         if (section == "Sources") {
         item { SectionTitle("Catalog", "A public movie and TV catalog is built in. TMDB and Real-Debrid are optional.") }
@@ -612,11 +604,11 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         if (section == "Your data") item { SettingsPanel("Viewing activity", "Manage progress saved in Brio.") {
             Text("${state.history.size} saved plays · ${state.watchlist.size} titles in My List", color = Muted)
             OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.focusRing()) { Text("Clear viewing history") }
-            Text("Signed-in library changes sync when your email account is connected.", color = Muted,
+            Text("Use Devices to sync your library with another device on your Wi-Fi.", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.1 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.2 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }

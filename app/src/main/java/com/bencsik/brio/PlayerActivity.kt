@@ -83,7 +83,6 @@ class PlayerActivity : ComponentActivity() {
     private var servers: List<Stream> = emptyList()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        EmailLibrary.get(this)
         store = BrioStore(this)
         val parsed = runCatching { Gson().fromJson(intent.getStringExtra("playback"), Playback::class.java) }.getOrNull()
         if (parsed == null) { finish(); return }
@@ -220,7 +219,6 @@ class PlayerActivity : ComponentActivity() {
         connectionJob?.cancel(); timeoutJob?.cancel()
         exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
         releasePlayer()
-        EmailLibrary.get(this).syncNow()
         super.onStop()
     }
     override fun onSaveInstanceState(outState: Bundle) {

@@ -49,6 +49,6 @@ Intro/credits timestamps are content-specific. Brio does not guess them or promi
 - `app`: Adaptive Compose interface, encrypted persistence, and lifecycle-managed Media3 player.
 - `.github/workflows/android.yml`: APK, lint, and test automation.
 
-No ads or analytics. Email-code account sync is available after the app owner completes [cloud setup](docs/EMAIL_SIGNIN_SETUP.md). The public catalog works without sign-in. Provider keys and stream links stay on each device.
+No ads or analytics. Sync your watchlist and progress between Brio devices on the same Wi-Fi using a temporary code in **Settings → Devices**; see [device sync](docs/DEVICE_SYNC.md). This is a manual transfer and needs no cloud account. The public catalog works without sign-in. Provider keys and stream links stay on each device.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB. Blender sample films retain their creators' licensing and credits. Real-Debrid and TMDB are external services and are not affiliated with Brio.
