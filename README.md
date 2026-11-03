@@ -22,17 +22,18 @@ remote navigation.
 
 ## Get the Android app
 
-1. Open [Releases](https://github.com/benjaminbencsik/Brio/releases/latest)
-   while signed in to the GitHub account with access to this private repository.
+1. Open [Releases](https://github.com/benjaminbencsik/Brio/releases/latest).
+   While the repository is private, sign in to the GitHub account with access.
 2. Download `app-debug.apk` and install it. For an onn. or other Android TV
    device, transfer the APK once with a file-transfer app or ADB and open it.
 3. For later versions, use **Settings → About → App updates** inside Brio.
-   Create a fine-grained GitHub token restricted to this repository with only
-   **Contents: read-only**, then enter it on the device once. Tap **Check for
-   updates** and **Download and install** when a newer version is available.
+   Public releases need no account or token. If the repository stays private,
+   use **Private repo setup** to enter a fine-grained GitHub token restricted to
+   this repository with only **Contents: read-only**. Tap **Check for updates**
+   and **Download and install** when a newer version is available.
    Android shows its normal install confirmation and may first ask you to allow
-   installs from Brio. The token is encrypted with Android Keystore on that
-   device; remove it any time in the same settings panel.
+   installs from Brio. Any optional token is encrypted with Android Keystore
+   on that device; remove it any time in the same settings panel.
 
 Enable installation from the app opening the APK when Android asks. The CI
 workflow caches one debug signing key to make updates install over builds made
@@ -67,7 +68,7 @@ Actions runs the same checks on pushes and pull requests.
 | `core/` | Catalog clients, source adapters, playback models, Real-Debrid client, JVM tests |
 | `docs/SOURCE_PROVIDER.md` | Supported playback sources and JSON endpoint contract |
 | `docs/DEVICE_SYNC.md` | Phone, tablet, and TV pairing instructions |
-| `.github/workflows/android.yml` | APK checks, private release, and build artifacts |
+| `.github/workflows/android.yml` | APK checks, GitHub release, and build artifacts |
 
 Secrets and source URLs are encrypted with Android Keystore on the device and
 are excluded from backups. They are not shared by device pairing. Brio has no

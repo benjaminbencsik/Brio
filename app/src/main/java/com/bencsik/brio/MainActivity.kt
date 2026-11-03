@@ -544,6 +544,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     val updater = remember { UpdateClient(context.applicationContext) }
     var tokenInput by remember { mutableStateOf("") }
     var savedUpdateToken by remember { mutableStateOf(updater.hasToken()) }
+    var showTokenSetup by remember { mutableStateOf(false) }
     var release by remember { mutableStateOf<UpdateClient.Release?>(null) }
     var updateStatus by remember { mutableStateOf("") }
     var updateBusy by remember { mutableStateOf(false) }
@@ -707,53 +708,59 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.5 · Made for your next great watch", color = Muted)
-            SettingsPanel("App updates", "Check the private Brio GitHub release and install a newer APK directly on this device.") {
-                if (!savedUpdateToken) {
-                    Text("One-time setup: create a fine-grained GitHub token restricted to the Brio repository with Contents: read-only. Paste it here on your device. You never need to send it to us.", color = Muted)
-                    OutlinedTextField(tokenInput, { tokenInput = it }, label = { Text("GitHub read-only token") },
-                        visualTransformation = PasswordVisualTransformation(), singleLine = true,
-                        modifier = Modifier.fillMaxWidth().focusRing())
-                    Button(onClick = {
-                        runCatching { updater.saveToken(tokenInput) }.onSuccess {
-                            savedUpdateToken = true; tokenInput = ""; updateStatus = "Token saved on this device."
-                        }.onFailure { updateStatus = it.message ?: "Could not save token." }
-                    }, enabled = tokenInput.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save token") }
-                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/settings/personal-access-tokens/new"))) }, modifier = Modifier.focusRing()) {
-                        Text("Create GitHub token →")
+            Text("Brio 0.5.6 · Made for your next great watch", color = Muted)
+            SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
+                Button(onClick = {
+                    scope.launch {
+                        updateBusy = true; release = null; updateStatus = "Checking GitHub…"
+                        try {
+                            release = withContext(Dispatchers.IO) { updater.check() }
+                            updateStatus = release?.let { "Brio ${it.version} is ready to download." } ?: "You're up to date."
+                        } catch (e: Exception) { updateStatus = e.message ?: "Could not check for updates." }
+                        finally { updateBusy = false }
                     }
-                } else {
-                    Text("GitHub token saved on this device.", color = Muted)
+                }, enabled = !updateBusy, modifier = Modifier.focusRing()) { Text("Check for updates") }
+                release?.let { latest ->
                     Button(onClick = {
                         scope.launch {
-                            updateBusy = true; release = null; updateStatus = "Checking GitHub…"
+                            updateBusy = true; downloadPercent = 0; updateStatus = "Downloading update…"
                             try {
-                                release = withContext(Dispatchers.IO) { updater.check() }
-                                updateStatus = release?.let { "Brio ${it.version} is ready to download." } ?: "You're up to date."
-                            } catch (e: Exception) { updateStatus = e.message ?: "Could not check for updates." }
+                                val apk = withContext(Dispatchers.IO) {
+                                    updater.download(latest) { progress -> scope.launch { downloadPercent = progress } }
+                                }
+                                updateStatus = "Follow the Android installer to finish updating."
+                                installUpdate(apk)
+                            } catch (e: Exception) { updateStatus = e.message ?: "Could not download update." }
                             finally { updateBusy = false }
                         }
-                    }, enabled = !updateBusy, modifier = Modifier.focusRing()) { Text("Check for updates") }
-                    release?.let { latest ->
-                        Button(onClick = {
-                            scope.launch {
-                                updateBusy = true; downloadPercent = 0; updateStatus = "Downloading update…"
-                                try {
-                                    val apk = withContext(Dispatchers.IO) {
-                                        updater.download(latest) { progress -> scope.launch { downloadPercent = progress } }
-                                    }
-                                    updateStatus = "Follow the Android installer to finish updating."
-                                    installUpdate(apk)
-                                } catch (e: Exception) { updateStatus = e.message ?: "Could not download update." }
-                                finally { updateBusy = false }
-                            }
-                        }, enabled = !updateBusy, modifier = Modifier.focusRing()) {
-                            Text(if (updateBusy) "Downloading $downloadPercent%" else "Download and install ${latest.version}")
-                        }
+                    }, enabled = !updateBusy, modifier = Modifier.focusRing()) {
+                        Text(if (updateBusy) "Downloading $downloadPercent%" else "Download and install ${latest.version}")
                     }
+                }
+                if (savedUpdateToken) {
+                    Text("GitHub token saved on this device for private releases.", color = Muted)
                     TextButton(onClick = { updater.clearToken(); savedUpdateToken = false; release = null; updateStatus = "Token removed." },
                         modifier = Modifier.focusRing()) { Text("Remove update token") }
+                } else {
+                    Text("Public releases need no account or token. If Brio remains private, add a GitHub read-only token.", color = Muted)
+                    TextButton(onClick = { showTokenSetup = !showTokenSetup }, modifier = Modifier.focusRing()) {
+                        Text(if (showTokenSetup) "Hide private repo setup" else "Private repo setup")
+                    }
+                    if (showTokenSetup) {
+                        Text("Create a fine-grained token restricted to Brio with Contents: read-only. Enter it on this device; you do not need to send it to us.", color = Muted)
+                        OutlinedTextField(tokenInput, { tokenInput = it }, label = { Text("GitHub read-only token") },
+                            visualTransformation = PasswordVisualTransformation(), singleLine = true,
+                            modifier = Modifier.fillMaxWidth().focusRing())
+                        Button(onClick = {
+                            runCatching { updater.saveToken(tokenInput) }.onSuccess {
+                                savedUpdateToken = true; showTokenSetup = false; tokenInput = ""; updateStatus = "Token saved on this device."
+                            }.onFailure { updateStatus = it.message ?: "Could not save token." }
+                        }, enabled = tokenInput.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save token") }
+                        TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/settings/personal-access-tokens/new"))) }, modifier = Modifier.focusRing()) {
+                            Text("Create GitHub token →")
+                        }
+                    }
                 }
                 if (updateStatus.isNotBlank()) Text(updateStatus, color = Muted)
                 Text("Android may ask you to allow installs from Brio once. It will show the system installer for each update.",

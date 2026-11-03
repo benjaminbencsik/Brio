@@ -18,7 +18,7 @@ import androidx.core.content.FileProvider
 
 class BrioFileProvider : FileProvider()
 
-/** Reads a private GitHub release with a device-only, read-only token. */
+/** Reads a GitHub release anonymously or with a device-only token for private repos. */
 internal class UpdateClient(private val context: Context) {
     private val prefs = context.getSharedPreferences("brio_updates", Context.MODE_PRIVATE)
     private val alias = "brio_release_token"
@@ -38,8 +38,8 @@ internal class UpdateClient(private val context: Context) {
 
     fun clearToken() { prefs.edit().remove("token").apply() }
 
-    private fun token(): String {
-        val saved = prefs.getString("token", null) ?: error("Add your GitHub read-only token first.")
+    private fun token(): String? {
+        val saved = prefs.getString("token", null) ?: return null
         return try {
             val bytes = Base64.decode(saved, Base64.DEFAULT)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -61,7 +61,11 @@ internal class UpdateClient(private val context: Context) {
     fun check(): Release? {
         val connection = connect(releaseUrl, token(), "application/vnd.github+json")
         val body = try {
-            if (connection.responseCode !in 200..299) error("GitHub couldn't read the private release (${connection.responseCode}). Check token access and try again.")
+            if (connection.responseCode !in 200..299) {
+                if (connection.responseCode == 404 && !hasToken())
+                    error("No public Brio release found. If the repository is still private, add a read-only GitHub token below.")
+                error("GitHub couldn't read the release (${connection.responseCode}). Check repository access and try again.")
+            }
             connection.inputStream.bufferedReader().use { it.readText() }
         } finally { connection.disconnect() }
         val json = JSONObject(body)
@@ -97,7 +101,7 @@ internal class UpdateClient(private val context: Context) {
                 connection = connect(url, if (URL(url).host == "api.github.com") auth else null, "application/octet-stream")
                 val code = connection!!.responseCode
                 if (code !in 300..399) {
-                    if (code !in 200..299) error("APK download failed ($code). Check your GitHub token.")
+                    if (code !in 200..299) error("APK download failed ($code). Check repository access and try again.")
                     val folder = File(context.cacheDir, "updates").apply { mkdirs() }
                     val partial = File(folder, "brio-update.part")
                     val apk = File(folder, "brio-update.apk")
