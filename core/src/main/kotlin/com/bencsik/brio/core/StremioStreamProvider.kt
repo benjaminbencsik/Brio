@@ -2,7 +2,11 @@ package com.bencsik.brio.core
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -12,13 +16,37 @@ import java.util.concurrent.TimeUnit
 fun normalizeProviderEndpoint(value: String): String =
     requireHttps(value.trim().replaceFirst(Regex("^stremio://"), "https://"))
 
+/** One source URL per line. Existing single-source settings remain valid. */
+fun normalizeProviderEndpoints(value: String): List<String> {
+    val entries = value.lines().map(String::trim).filter(String::isNotEmpty)
+    require(entries.size <= 6) { "Add up to six source URLs." }
+    return entries.map(::normalizeProviderEndpoint).distinct()
+}
+
+/** Each source gets a chance to resolve. A failure in one must not hide the others. */
+internal suspend fun aggregateSources(providers: List<suspend () -> List<Stream>>): List<Stream> = supervisorScope {
+    val results = providers.map { provider -> async {
+        try { Result.success(provider()) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    } }.awaitAll()
+    if (results.all { it.isFailure }) {
+        val details = results.mapNotNull { it.exceptionOrNull()?.message }.distinct().take(2).joinToString("; ")
+        error(details.ifBlank { "No sources are reachable. Try another source or a direct link." })
+    }
+    results.flatMap { it.getOrNull().orEmpty() }.distinctBy { it.url to it.headers }
+}
+
 suspend fun resolveConfiguredSources(endpoint: String, tmdbToken: String, request: StreamRequest): List<Stream> {
-    if (endpoint.isBlank()) return VixsrcStreamProvider().resolve(request)
-    val normalized = normalizeProviderEndpoint(endpoint)
-    return if (normalized.toHttpUrlOrNull()!!.encodedPath.endsWith("/manifest.json")) {
-        val imdbId = request.imdbId ?: MediaRepository(tmdbToken).imdbId(request)
-        StremioStreamProvider(normalized, imdbId).resolve(request)
-    } else JsonStreamProvider(normalized).resolve(request)
+    val endpoints = normalizeProviderEndpoints(endpoint)
+    val providers = listOf<suspend () -> List<Stream>>({ VixsrcStreamProvider().resolve(request) }) +
+        endpoints.map { normalized -> suspend {
+            if (normalized.toHttpUrlOrNull()!!.encodedPath.endsWith("/manifest.json")) {
+                val imdbId = request.imdbId ?: MediaRepository(tmdbToken).imdbId(request)
+                StremioStreamProvider(normalized, imdbId).resolve(request)
+            } else JsonStreamProvider(normalized).resolve(request)
+        } }
+    return aggregateSources(providers)
 }
 
 /** Direct HTTPS streams from a configured Stremio-compatible add-on. */
@@ -82,3 +110,4 @@ class StremioStreamProvider(
     }
 }
 private fun JsonObject.text(key: String): String = get(key)?.takeUnless { it.isJsonNull }?.asString.orEmpty()
+

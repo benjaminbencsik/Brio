@@ -481,6 +481,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var addressInput by rememberSaveable { mutableStateOf("") }
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
     var provider by remember { mutableStateOf(vm.store.provider) }
+    var newSource by rememberSaveable { mutableStateOf("") }
+    var sourceError by remember { mutableStateOf<String?>(null) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
     var section by rememberSaveable { mutableStateOf("Experience") }
     var showContinue by remember { mutableStateOf(vm.store.showContinueOnHome) }
@@ -592,9 +594,35 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }, modifier = Modifier.focusRing()) { Text("Disconnect Real-Debrid") }
         }
         item { HorizontalDivider(color = Slate) }
-        item { SectionTitle("Stream provider", "Vixsrc is built in. Leave the field blank to use it, or enter another provider.") }
-        item { OutlinedTextField(provider, { provider = it }, label = { Text("Add-on manifest URL or HTTPS endpoint") }, placeholder = { Text("https://your-addon.example/manifest.json") }, modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true) }
-        item { Text("Built-in Vixsrc resolves movie and episode links automatically. Availability depends on the provider. Custom add-ons must supply direct HTTPS video links.", color = Muted) }
+        item { SectionTitle("Playback sources", "Brio checks its built-in source and the sources you add, then shows available videos together.") }
+        item { SettingsPanel("Built-in source", "Vixsrc · always checked during playback") {
+            Text("Availability varies by title and network. Other sources can still appear when this one fails.", color = Muted)
+        } }
+        item { SettingsPanel("Your sources", "Add up to six HTTPS add-on manifests or Brio JSON endpoints.") {
+            val entries = provider.lines().map(String::trim).filter(String::isNotBlank)
+            if (entries.isEmpty()) Text("No extra sources added yet.", color = Muted)
+            entries.forEachIndexed { index, endpoint ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(endpoint, modifier = Modifier.weight(1f), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { provider = entries.filterIndexed { i, _ -> i != index }.joinToString("\n") },
+                        modifier = Modifier.focusRing()) { Text("Remove") }
+                }
+            }
+            OutlinedTextField(newSource, { newSource = it; sourceError = null },
+                label = { Text("Add source URL") }, placeholder = { Text("https://example.org/manifest.json") },
+                modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true)
+            sourceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            OutlinedButton(onClick = {
+                try {
+                    val added = normalizeProviderEndpoint(newSource)
+                    provider = normalizeProviderEndpoints((entries + added).joinToString("\n")).joinToString("\n")
+                    newSource = ""; sourceError = null
+                } catch (e: Exception) { sourceError = e.message ?: "Enter a valid HTTPS source URL." }
+            }, enabled = newSource.isNotBlank(), modifier = Modifier.focusRing()) { Text("Add source") }
+            Text("Add-ons must return direct HTTPS video URLs. Sources and any keys in their URLs are saved on this device.",
+                color = Muted, style = MaterialTheme.typography.bodySmall)
+        } }
         item { Button(onClick = { vm.saveSettings(tmdb, provider, debrid) }, modifier = Modifier.fillMaxWidth().focusRing()) { Text("Save settings") } }
         item {
             HorizontalDivider(color = Slate)
@@ -608,7 +636,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.2 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.3 · Made for your next great watch", color = Muted)
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }

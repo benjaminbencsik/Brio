@@ -201,7 +201,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSettings(tmdb: String, provider: String, debrid: String) {
         try {
             debridJob?.cancel()
-            val normalizedProvider = if (provider.isNotBlank()) normalizeProviderEndpoint(provider) else ""
+            val normalizedProvider = normalizeProviderEndpoints(provider).joinToString("\n")
             store.tmdbToken = tmdb; store.provider = normalizedProvider; store.debridToken = debrid
             update { it.copy(account = null, downloads = emptyList(), torrents = emptyList(), torrentFiles = emptyList(), notice = "Settings saved.") }
             reload(); loadHomeRows()

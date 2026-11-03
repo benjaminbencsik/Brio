@@ -1,54 +1,65 @@
 # Brio
 
-A native, ad-free Android streaming app for phones, tablets, and Android TV / Google TV, including Onn boxes. One APK adapts to touch and D-pad navigation.
+Brio is an ad-free Android movie and TV browser and player for phones, tablets,
+and Android TV / Google TV devices such as onn. The same APK supports touch and
+remote navigation.
 
-## Included in 0.1
+## What it does
 
-- Movie and TV catalog with TMDB search, details, seasons, and episodes.
-- Open movie samples available without configuring an account.
-- Watchlist and per-episode playback history with resume positions.
-- MP4, HLS, and DASH playback through Media3, subtitle / audio controls, and remote media keys.
-- Direct HTTPS links, Android text sharing, and local files via the system picker.
-- Optional Real-Debrid API-token connection, account verification, download history, completed torrent file selection, and host-link resolution.
-- Optional JSON source provider, independent from TMDB metadata.
-- Skip intro and credits using provider timing markers; Next episode in the same action area for shows, including season transitions. Manual 90-second skip when timing markers are absent.
-- Android Keystore encryption for credentials, provider endpoint, watchlist, and playback history. Backups are disabled. Tokens never enter the repository.
-- GitHub Actions builds and uploads a debug APK on pushes and pull requests.
+- Browse and search movies and shows with the public Cinemeta catalog, or add
+  your own TMDB read token. Browse genres, seasons, and episodes.
+- Play direct MP4, HLS, and DASH links, local files, and supported sources through
+  Media3. A catalog entry has video only when a source returns a playable link.
+- Check the built-in source and up to six additional source URLs together. Add
+  Stremio-compatible manifests or Brio JSON endpoints in Settings. [Source
+  setup and API](docs/SOURCE_PROVIDER.md).
+- Keep a watchlist and resume progress; skip an intro or credits when accurate
+  markers exist, and move to the next episode.
+- Browse files in your own Real-Debrid account if you configure its token.
+- Transfer a watchlist and progress between Brio devices on the same Wi-Fi with
+  a temporary code. [Device sync](docs/DEVICE_SYNC.md) is manual, not an account
+  or an automatic cloud backup.
 
-## Build and install
+## Get the Android app
 
-Requirements: JDK 17, Android SDK platform 35 / build-tools 35.0.0. Android Studio can import this directory as a Gradle project. The checked-in Gradle wrapper downloads Gradle 8.11.1.
+1. Open [Actions](https://github.com/benjaminbencsik/Brio/actions) and choose
+   the newest successful **Build Brio APK** run on `main`.
+2. Download **Brio-debug-APK** from the run's **Artifacts** section. GitHub may
+   require you to sign in.
+3. Extract the ZIP and install `app-debug.apk` on your phone or tablet. For an
+   onn. or other Android TV device, transfer the extracted APK to the device
+   using a file-transfer app or ADB, then open it in a file manager.
+
+Enable installation from the app opening the APK when Android asks. The CI
+workflow caches one debug signing key to make updates install over builds made
+with the same cached key. If Android reports a signature conflict, uninstalling
+an older debug build will remove its local data. There is no production release
+or Play Store distribution yet.
+
+## Build from source
+
+Use JDK 17, Android SDK platform 35, and build-tools 35.0.0. Android Studio can
+import the repository as a Gradle project.
 
 ```sh
-./gradlew :core:test :app:lintDebug :app:assembleDebug
+bash gradlew :core:test :app:lintDebug :app:assembleDebug
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`.
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. GitHub
+Actions runs the same checks on pushes and pull requests.
 
-From your phone: open this repository's **Actions** tab, open a successful **Build Brio APK** run, download **Brio-debug-APK**, unzip it, and install the APK. GitHub may require you to sign in to download artifacts.
+## Project map
 
-Install on Android TV using a file-transfer app and file manager, or your device's supported ADB / wireless-debugging method. Enable installation from the app doing the installation. Brio appears in both the mobile and TV launchers.
+| Path | Purpose |
+| --- | --- |
+| `app/` | Adaptive Compose UI, settings, encrypted local library, device pairing, Media3 player |
+| `core/` | Catalog clients, source adapters, playback models, Real-Debrid client, JVM tests |
+| `docs/SOURCE_PROVIDER.md` | Supported playback sources and JSON endpoint contract |
+| `docs/DEVICE_SYNC.md` | Phone, tablet, and TV pairing instructions |
+| `.github/workflows/android.yml` | APK build, tests, lint, and artifact upload |
 
-The initial APK is a debug build for testing. Publishing requires your own release signing key and a production release configuration. Do not replace the signing key between updates. Source changes don't update installed APKs automatically: install the newly built APK. Fresh GitHub runners generate their own debug signing key, so a CI APK may require uninstalling an earlier APK before installation (which clears its local settings). Configure a persistent signing key before distributing regular updates.
-
-## First launch
-
-1. Play a sample open movie to check video and remote controls.
-2. Open **Settings**. Enter a TMDB **API Read Access Token** (the long Bearer token, not the short API key) for the movie / TV catalog.
-3. Optionally enter a Real-Debrid token from https://real-debrid.com/apitoken and select **Verify account**. Save settings. Account premium restrictions are enforced by Real-Debrid.
-4. Open **Debrid** to browse your existing account downloads and torrents, or use **Open link** with **Resolve with Real-Debrid** enabled.
-5. For catalog-based playback, configure a source endpoint following `docs/SOURCE_PROVIDER.md`.
-
-TMDB does not supply video files. Real-Debrid resolves host links and your account's files; it does not automatically match a TMDB movie to a playable file. No arbitrary third-party scraper or torrent-search index is bundled. Without a configured source provider, catalog entries can be saved and browsed, while actual playback uses samples, your links, local files, or your Real-Debrid library.
-
-Intro/credits timestamps are content-specific. Brio does not guess them or promise automatic recognition. Next episode requires TMDB metadata and a configured source provider. Direct links and Real-Debrid library files have no episode mapping unless played through a catalog provider.
-
-## Project layout
-
-- `core`: Kotlin/JVM models, catalog API, provider contract, Real-Debrid client, and HTTP tests.
-- `app`: Adaptive Compose interface, encrypted persistence, and lifecycle-managed Media3 player.
-- `.github/workflows/android.yml`: APK, lint, and test automation.
-
-No ads or analytics. Sync your watchlist and progress between Brio devices on the same Wi-Fi using a temporary code in **Settings → Devices**; see [device sync](docs/DEVICE_SYNC.md). This is a manual transfer and needs no cloud account. The public catalog works without sign-in. Provider keys and stream links stay on each device.
-
-This product uses the TMDB API but is not endorsed or certified by TMDB. Blender sample films retain their creators' licensing and credits. Real-Debrid and TMDB are external services and are not affiliated with Brio.
+Secrets and source URLs are encrypted with Android Keystore on the device and
+are excluded from backups. They are not shared by device pairing. Brio has no
+ads or analytics. Catalog metadata and source availability come from external
+services; Brio is not affiliated with them. This product uses the TMDB API but
+is not endorsed or certified by TMDB.
