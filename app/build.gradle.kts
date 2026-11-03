@@ -11,8 +11,8 @@ android {
         applicationId = "com.bencsik.brio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.5.4"
+        versionCode = 17
+        versionName = "0.5.5"
     }
     signingConfigs {
         getByName("debug") {
@@ -36,6 +36,7 @@ dependencies {
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.core:core:1.16.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")

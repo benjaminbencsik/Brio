@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -12,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -47,11 +50,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.bencsik.brio.core.*
 import com.google.gson.Gson
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val Lime = Color(0xFFB8F36A)
 private val Night = Color(0xFF080D15)
@@ -64,6 +71,10 @@ private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 class MainActivity : ComponentActivity() {
     private val vm: BrioViewModel by viewModels()
     private var sharedLink by mutableStateOf("")
+    private var pendingUpdate: File? = null
+    private val installPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (packageManager.canRequestPackageInstalls()) pendingUpdate?.let(::launchInstaller)
+    }
     private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             runCatching { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -77,7 +88,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Lime, onPrimary = Night, background = Night, surface = Slate, onSurface = Color.White, secondary = Lime)) {
                 TvScrollFocus(television) {
-                    BrioApp(vm, television, sharedLink, { sharedLink = "" }, ::play, { openFile.launch(arrayOf("video/*", "audio/*")) })
+                    BrioApp(vm, television, sharedLink, { sharedLink = "" }, ::play,
+                        { openFile.launch(arrayOf("video/*", "audio/*")) }, ::installUpdate)
                 }
             }
         }
@@ -90,6 +102,19 @@ class MainActivity : ComponentActivity() {
     private fun play(playback: Playback) {
         if (playback.stream.url.isBlank()) { vm.resumeCloud(playback, ::play); return }
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("playback", Gson().toJson(playback)))
+    }
+    private fun installUpdate(apk: File) {
+        pendingUpdate = apk
+        if (!packageManager.canRequestPackageInstalls()) {
+            installPermission.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:$packageName")))
+        } else launchInstaller(apk)
+    }
+    private fun launchInstaller(apk: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", apk)
+        startActivity(Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        pendingUpdate = null
     }
 }
 
@@ -110,7 +135,8 @@ private fun TvScrollFocus(enabled: Boolean, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearShared: () -> Unit, play: (Playback) -> Unit, local: () -> Unit) {
+private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearShared: () -> Unit, play: (Playback) -> Unit,
+    local: () -> Unit, installUpdate: (File) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf("Home") }
     var kind by rememberSaveable { mutableStateOf("movie") }
@@ -198,7 +224,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                                 categoryLabel = label; categoryGenre = genre; categoryParent = tab
                                 tab = "Category"; vm.browse(kind, genre = genre)
                             }
-                            tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state) }
+                            tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state, installUpdate) }
                             tab == "Debrid" -> Box(Modifier.padding(horizontal = 16.dp)) { DebridScreen(vm, state, play) }
                             tab == "Continue" -> Box(Modifier.padding(horizontal = 16.dp)) { HistoryScreen(state, play, { vm.store.clearHistory(); vm.refreshLibrary() }) }
                             tab == "My List" -> CatalogGrid(state.watchlist, wide, false, false, "Your list is empty", "Save a movie or show to see it here.", vm::select, {})
@@ -363,7 +389,17 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 
 @Composable private fun Brand() {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)).background(Lime), contentAlignment = Alignment.Center) { Text("▶", color = Night, fontWeight = FontWeight.Black) }
+        Box(Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)).background(Lime), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(width = 13.dp, height = 15.dp).offset(x = 1.dp)) {
+                val shape = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, size.height / 2f)
+                    lineTo(0f, size.height)
+                    close()
+                }
+                drawPath(shape, Night)
+            }
+        }
         Text("brio", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = Color.White)
     }
 }
@@ -501,10 +537,17 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
         }
     }
 }
-@Composable private fun SettingsScreen(vm: BrioViewModel, state: UiState) {
+@Composable private fun SettingsScreen(vm: BrioViewModel, state: UiState, installUpdate: (File) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val pairing by vm.pairing.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val updater = remember { UpdateClient(context.applicationContext) }
+    var tokenInput by remember { mutableStateOf("") }
+    var savedUpdateToken by remember { mutableStateOf(updater.hasToken()) }
+    var release by remember { mutableStateOf<UpdateClient.Release?>(null) }
+    var updateStatus by remember { mutableStateOf("") }
+    var updateBusy by remember { mutableStateOf(false) }
+    var downloadPercent by remember { mutableIntStateOf(0) }
     var codeInput by rememberSaveable { mutableStateOf("") }
     var addressInput by rememberSaveable { mutableStateOf("") }
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
@@ -664,7 +707,58 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.4 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.5 · Made for your next great watch", color = Muted)
+            SettingsPanel("App updates", "Check the private Brio GitHub release and install a newer APK directly on this device.") {
+                if (!savedUpdateToken) {
+                    Text("One-time setup: create a fine-grained GitHub token restricted to the Brio repository with Contents: read-only. Paste it here on your device. You never need to send it to us.", color = Muted)
+                    OutlinedTextField(tokenInput, { tokenInput = it }, label = { Text("GitHub read-only token") },
+                        visualTransformation = PasswordVisualTransformation(), singleLine = true,
+                        modifier = Modifier.fillMaxWidth().focusRing())
+                    Button(onClick = {
+                        runCatching { updater.saveToken(tokenInput) }.onSuccess {
+                            savedUpdateToken = true; tokenInput = ""; updateStatus = "Token saved on this device."
+                        }.onFailure { updateStatus = it.message ?: "Could not save token." }
+                    }, enabled = tokenInput.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save token") }
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/settings/personal-access-tokens/new"))) }, modifier = Modifier.focusRing()) {
+                        Text("Create GitHub token →")
+                    }
+                } else {
+                    Text("GitHub token saved on this device.", color = Muted)
+                    Button(onClick = {
+                        scope.launch {
+                            updateBusy = true; release = null; updateStatus = "Checking GitHub…"
+                            try {
+                                release = withContext(Dispatchers.IO) { updater.check() }
+                                updateStatus = release?.let { "Brio ${it.version} is ready to download." } ?: "You're up to date."
+                            } catch (e: Exception) { updateStatus = e.message ?: "Could not check for updates." }
+                            finally { updateBusy = false }
+                        }
+                    }, enabled = !updateBusy, modifier = Modifier.focusRing()) { Text("Check for updates") }
+                    release?.let { latest ->
+                        Button(onClick = {
+                            scope.launch {
+                                updateBusy = true; downloadPercent = 0; updateStatus = "Downloading update…"
+                                try {
+                                    val apk = withContext(Dispatchers.IO) {
+                                        updater.download(latest) { progress -> scope.launch { downloadPercent = progress } }
+                                    }
+                                    updateStatus = "Follow the Android installer to finish updating."
+                                    installUpdate(apk)
+                                } catch (e: Exception) { updateStatus = e.message ?: "Could not download update." }
+                                finally { updateBusy = false }
+                            }
+                        }, enabled = !updateBusy, modifier = Modifier.focusRing()) {
+                            Text(if (updateBusy) "Downloading $downloadPercent%" else "Download and install ${latest.version}")
+                        }
+                    }
+                    TextButton(onClick = { updater.clearToken(); savedUpdateToken = false; release = null; updateStatus = "Token removed." },
+                        modifier = Modifier.focusRing()) { Text("Remove update token") }
+                }
+                if (updateStatus.isNotBlank()) Text(updateStatus, color = Muted)
+                Text("Android may ask you to allow installs from Brio once. It will show the system installer for each update.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Text("This product uses the TMDB API but is not endorsed or certified by TMDB.", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org"))) }, modifier = Modifier.focusRing()) { Text("The Movie Database →") }
         }

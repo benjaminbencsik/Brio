@@ -22,19 +22,30 @@ remote navigation.
 
 ## Get the Android app
 
-1. Open [Actions](https://github.com/benjaminbencsik/Brio/actions) and choose
-   the newest successful **Build Brio APK** run on `main`.
-2. Download **Brio-debug-APK** from the run's **Artifacts** section. GitHub may
-   require you to sign in.
-3. Extract the ZIP and install `app-debug.apk` on your phone or tablet. For an
-   onn. or other Android TV device, transfer the extracted APK to the device
-   using a file-transfer app or ADB, then open it in a file manager.
+1. Open [Releases](https://github.com/benjaminbencsik/Brio/releases/latest)
+   while signed in to the GitHub account with access to this private repository.
+2. Download `app-debug.apk` and install it. For an onn. or other Android TV
+   device, transfer the APK once with a file-transfer app or ADB and open it.
+3. For later versions, use **Settings → About → App updates** inside Brio.
+   Create a fine-grained GitHub token restricted to this repository with only
+   **Contents: read-only**, then enter it on the device once. Tap **Check for
+   updates** and **Download and install** when a newer version is available.
+   Android shows its normal install confirmation and may first ask you to allow
+   installs from Brio. The token is encrypted with Android Keystore on that
+   device; remove it any time in the same settings panel.
 
 Enable installation from the app opening the APK when Android asks. The CI
 workflow caches one debug signing key to make updates install over builds made
 with the same cached key. If Android reports a signature conflict, uninstalling
-an older debug build will remove its local data. There is no production release
-or Play Store distribution yet.
+an older debug build will remove its local data. The GitHub release contains a
+debug APK; there is no Play Store distribution yet.
+
+## Web preview
+
+Brio Web is a separate browser version with the same browsing style, watchlist,
+search, and direct-link playback. Browser data stays local and does not sync
+with the Android app. The Android built-in playback source is unavailable in a
+normal browser; browser sources need direct HTTPS video URLs and CORS access.
 
 ## Build from source
 
@@ -56,7 +67,7 @@ Actions runs the same checks on pushes and pull requests.
 | `core/` | Catalog clients, source adapters, playback models, Real-Debrid client, JVM tests |
 | `docs/SOURCE_PROVIDER.md` | Supported playback sources and JSON endpoint contract |
 | `docs/DEVICE_SYNC.md` | Phone, tablet, and TV pairing instructions |
-| `.github/workflows/android.yml` | APK build, tests, lint, and artifact upload |
+| `.github/workflows/android.yml` | APK checks, private release, and build artifacts |
 
 Secrets and source URLs are encrypted with Android Keystore on the device and
 are excluded from backups. They are not shared by device pairing. Brio has no
