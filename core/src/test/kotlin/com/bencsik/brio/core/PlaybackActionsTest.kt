@@ -14,9 +14,18 @@ class PlaybackActionsTest {
         assertEquals(650000L, skipActions(marked.copy(creditsEndMs = 650000), 610000, 700000).creditsTargetMs)
         assertFalse(skipActions(marked.copy(creditsEndMs = 650000), 650000, 700000).inCredits)
     }
-    @Test fun missingMarkersDoNotGuessAndUnknownDurationDoesNotSeekToZero() {
+    @Test fun manualIntroOnlyForEarlyEpisodesWithoutMarkers() {
         val unmarked = Stream("https://example.com/video.mp4")
-        assertNull(skipActions(unmarked, 60000, 700000).introTargetMs)
+        val early = skipActions(unmarked, 45000, 1800000, isEpisode = true)
+        assertEquals(135000L, early.introTargetMs)
+        assertTrue(early.introIsEstimated)
+        assertNull(skipActions(unmarked, 45000, 1800000).introTargetMs)
+        assertNull(skipActions(unmarked, 600000, 1800000, isEpisode = true).introTargetMs)
+        assertNull(skipActions(unmarked, 45000, 1800000, isEpisode = true, introDismissed = true).introTargetMs)
+        assertNull(skipActions(unmarked, 45000, 100000, isEpisode = true).introTargetMs)
+    }
+    @Test fun missingMarkersDoNotGuessCreditsAndUnknownDurationDoesNotSeekToZero() {
+        val unmarked = Stream("https://example.com/video.mp4")
         assertFalse(skipActions(unmarked, 600000, 700000).inCredits)
         assertNull(skipActions(marked, 610000, 0).creditsTargetMs)
     }

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -126,8 +127,10 @@ private fun TvScrollFocus(enabled: Boolean, content: @Composable () -> Unit) {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
                 if (size >= containerSize) return 0f
-                val target = (containerSize * 0.18f).coerceAtMost(containerSize - size)
-                return offset - target
+                val inset = (containerSize * 0.06f).coerceAtMost(48f)
+                if (offset < inset) return offset - inset
+                val end = offset + size - (containerSize - inset)
+                return end.coerceAtLeast(0f)
             }
         }
     }
@@ -434,8 +437,10 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 @Composable private fun Poster(item: Title, rank: Int? = null, click: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.045f else 1f, label = "posterFocus")
-    Column(Modifier.scale(scale).clip(RoundedCornerShape(12.dp)).border(if (focused) 3.dp else 0.dp, if (focused) Lime else Color.Transparent, RoundedCornerShape(12.dp))
+    val tv = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+    val scale by animateFloatAsState(if (focused && !tv) 1.035f else 1f, label = "posterFocus")
+    Column((if (tv) Modifier else Modifier.scale(scale)).clip(RoundedCornerShape(12.dp))
+        .border(2.dp, if (focused) Lime else Color.Transparent, RoundedCornerShape(12.dp))
         .clickable(interactionSource = interaction, indication = null, onClick = click)) {
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(Color(0xFF34475B), Slate, Color(0xFF25342C))))) {
             if (item.poster != null) AsyncImage(item.poster, item.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -708,7 +713,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.6 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.7 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

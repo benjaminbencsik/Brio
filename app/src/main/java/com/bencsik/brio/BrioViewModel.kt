@@ -37,7 +37,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
         sourceJob = viewModelScope.launch {
             update { it.copy(resolving = true, error = null) }
             attempt {
-                val streams = resolveConfiguredSources(store.provider, store.tmdbToken,
+                val streams = store.resolveSources(
                     StreamRequest(playback.title.id, playback.title.kind, playback.season, playback.episode, playback.title.imdbId))
                 check(streams.isNotEmpty()) { "No source is available for this saved episode." }
                 update { it.copy(resolving = false) }
@@ -155,7 +155,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
             attempt {
                 val episodes = BrioCatalog(store.tmdbToken).episodes(item, 1)
                 check(episodes.any { it.number == 1 }) { "Season 1, Episode 1 is not available for this show." }
-                val streams = resolveConfiguredSources(store.provider, store.tmdbToken,
+                val streams = store.resolveSources(
                     StreamRequest(item.id, "tv", 1, 1, item.imdbId))
                 check(streams.isNotEmpty()) { "No source was found for Season 1, Episode 1. Your progress has been kept." }
                 // Reset only after a playable source has been resolved.
@@ -176,7 +176,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                 val streams = when {
                     item.demoUrl != null -> listOf(Stream(item.demoUrl!!, "Blender open movie", "HD"))
                     item.kind == "tv" && (snapshot.season == null || snapshot.episode == null) -> error("Choose a season and episode first.")
-                    else -> resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode, item.imdbId))
+                    else -> store.resolveSources(StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode, item.imdbId))
                 }
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
                 update { it.copy(streams = streams, resolving = false) }

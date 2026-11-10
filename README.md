@@ -13,8 +13,14 @@ remote navigation.
 - Check the built-in source and up to six additional source URLs together. Add
   Stremio-compatible manifests or Brio JSON endpoints in Settings. [Source
   setup and API](docs/SOURCE_PROVIDER.md).
+- The player shows every playable server returned for that title. If only one
+  source works, use **Servers → Add video link** to save a direct HTTPS link for
+  that movie or episode on this device. More provider endpoints can be added in
+  **Settings → Sources**; Brio does not invent extra servers.
 - Keep a watchlist and resume progress; skip an intro or credits when accurate
-  markers exist, and move to the next episode.
+  markers exist, and move to the next episode. For episodes without intro
+  markers, **Skip intro · +90s** offers a manual jump during the first ten
+  minutes. Automatic intro skipping still requires timing markers.
 - Browse files in your own Real-Debrid account if you configure its token.
 - Transfer a watchlist and progress between Brio devices on the same Wi-Fi with
   a temporary code. [Device sync](docs/DEVICE_SYNC.md) is manual, not an account

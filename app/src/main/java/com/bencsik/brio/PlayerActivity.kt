@@ -22,6 +22,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -67,7 +69,9 @@ class PlayerActivity : ComponentActivity() {
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
     private var nextLoading by mutableStateOf(false)
     private var finished by mutableStateOf(false)
-    private var introSkipped = false
+    private var introSkipped by mutableStateOf(false)
+    private val introFocusRequester = FocusRequester()
+    private var focusIntroAction by mutableStateOf(false)
     private var resumePosition = 0L
     private var resumePlay = true
     private var loadingNext = false
@@ -79,6 +83,9 @@ class PlayerActivity : ComponentActivity() {
     private var serverIndex by mutableIntStateOf(0)
     private var countdown by mutableIntStateOf(0)
     private var serverPicker by mutableStateOf(false)
+    private var addServer by mutableStateOf(false)
+    private var newServerUrl by mutableStateOf("")
+    private var serverError by mutableStateOf<String?>(null)
     private val attemptedServers = mutableSetOf<Int>()
     private var servers: List<Stream> = emptyList()
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,6 +99,7 @@ class PlayerActivity : ComponentActivity() {
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
+                addServer -> addServer = false
                 serverPicker -> serverPicker = false
                 error != null -> error = null
                 !connecting && !showActions -> {
@@ -135,22 +143,33 @@ class PlayerActivity : ComponentActivity() {
                     }, modifier = Modifier.fillMaxSize().focusable().onKeyEvent { handlePlayerKey(it.nativeKeyEvent) })
                     if (showActions && !pipMode) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
-                    val actions = skipActions(stream, position, duration)
+                    val actions = skipActions(stream, position, duration,
+                        isEpisode = playback.season != null && playback.episode != null,
+                        introDismissed = introSkipped)
                     val intro = actions.introTargetMs != null
                     val credits = actions.inCredits
                     val nearEnd = duration > 0 && position > 0 && duration - position <= 120000
-                    LaunchedEffect(stream.url, actions.introTargetMs) {
+                    LaunchedEffect(stream.url, actions.introTargetMs, connecting) {
                         val target = actions.introTargetMs
-                        if (store.autoSkipIntro && !introSkipped && target != null && !connecting) {
+                        if (store.autoSkipIntro && !introSkipped && !actions.introIsEstimated && target != null && !connecting) {
                             introSkipped = true
                             seek(target)
                         }
                     }
-                    LaunchedEffect(intro, credits, nearEnd, finished) {
-                        if (!pipMode && (intro || credits || (next != null && (nearEnd || finished)))) revealControls()
+                    LaunchedEffect(intro, credits, nearEnd, finished, connecting) {
+                        if (!pipMode && !connecting && (intro || credits || (next != null && (nearEnd || finished)))) revealControls()
+                    }
+                    LaunchedEffect(focusIntroAction, intro, showActions, connecting) {
+                        if (focusIntroAction && intro && showActions && !connecting) {
+                            introFocusRequester.requestFocus()
+                            focusIntroAction = false
+                        }
                     }
                     if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (intro) Button(onClick = { seek(actions.introTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip intro") }
+                        if (intro) Button(onClick = { introSkipped = true; seek(actions.introTargetMs!!) },
+                            modifier = Modifier.focusRequester(introFocusRequester).focusRing()) {
+                            Text(if (actions.introIsEstimated) "Skip intro · +90s" else "Skip intro")
+                        }
                         if (credits && actions.creditsTargetMs != null) OutlinedButton(onClick = { seek(actions.creditsTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip credits") }
                         if (next != null && (credits || nearEnd || finished)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
                     }
@@ -172,19 +191,43 @@ class PlayerActivity : ComponentActivity() {
                     } else if (showActions) {
                         Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
                             horizontalAlignment = Alignment.End) {
-                            TextButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Servers") }
+                            TextButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Servers · ${servers.size}") }
                             if (pipSupported && exo?.playbackState == Player.STATE_READY)
                                 OutlinedButton(onClick = ::minimize, modifier = Modifier.focusRing()) { Text("▣ Minimize") }
                         }
                     }
                     if (!pipMode && serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
-                        text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            itemsIndexed(servers) { index, source ->
-                                TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }, modifier = Modifier.focusRing()) {
-                                    Text("${index + 1}. ${source.name} · ${source.quality}")
+                        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (servers.size == 1) Text("Only one source returned a video for this title. Add a direct link here or add provider endpoints in Settings → Sources.")
+                            LazyColumn(Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                itemsIndexed(servers) { index, source ->
+                                    TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }, modifier = Modifier.focusRing()) {
+                                        Text("${index + 1}. ${source.name} · ${source.quality}")
+                                    }
                                 }
                             }
-                        } }, confirmButton = { TextButton(onClick = { serverPicker = false }, modifier = Modifier.focusRing()) { Text("Close") } })
+                        } }, confirmButton = { Row {
+                            TextButton(onClick = { serverPicker = false; newServerUrl = ""; serverError = null; addServer = true },
+                                modifier = Modifier.focusRing()) { Text("Add video link") }
+                            TextButton(onClick = { serverPicker = false }, modifier = Modifier.focusRing()) { Text("Close") }
+                        } })
+                    if (!pipMode && addServer) AlertDialog(onDismissRequest = { addServer = false },
+                        title = { Text("Add a video link") },
+                        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Save a direct HTTPS video link for ${playback.label}. It will appear as another server on this device.")
+                            OutlinedTextField(newServerUrl, { newServerUrl = it; serverError = null },
+                                label = { Text("HTTPS video URL") }, singleLine = true, modifier = Modifier.fillMaxWidth().focusRing())
+                            serverError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        } },
+                        confirmButton = { Button(onClick = {
+                            runCatching { store.addPersonalStream(playback.key, newServerUrl) }
+                                .onSuccess { source ->
+                                    servers = (servers + source).distinctBy { it.url to it.headers }
+                                    addServer = false; attemptedServers.clear()
+                                    tryServer(servers.indexOfLast { it.url == source.url && it.headers == source.headers })
+                                }.onFailure { serverError = it.message ?: "Enter a direct HTTPS video link." }
+                        }, enabled = newServerUrl.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save & play") } },
+                        dismissButton = { TextButton(onClick = { addServer = false }, modifier = Modifier.focusRing()) { Text("Cancel") } })
                     if (!pipMode) error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
                             confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
@@ -235,7 +278,7 @@ class PlayerActivity : ComponentActivity() {
         exo?.let { resumePosition = it.currentPosition; save() }
         releasePlayer()
         serverIndex = index; attemptedServers.add(index)
-        connecting = true; countdown = 0; error = null; finished = false; introSkipped = false
+        connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false
         connectionJob = lifecycleScope.launch {
             try {
                 val source = withTimeout(20000) { prepareStream(servers[index], store.debridToken) }
@@ -372,13 +415,13 @@ class PlayerActivity : ComponentActivity() {
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
-                val streams = resolveConfiguredSources(store.provider, store.tmdbToken, StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
+                val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
                 check(streams.isNotEmpty()) { "No streams are available for the next episode. Return to the catalog to choose another source." }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
                 save(); releasePlayer()
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
-                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false
+                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) startPlayer()
                 loadNextInfo()
             } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Couldn't load the next episode." }
@@ -387,6 +430,15 @@ class PlayerActivity : ComponentActivity() {
     }
     private fun handlePlayerKey(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP && playerView?.hasFocus() == true && !connecting &&
+            !serverPicker && error == null && playback.season != null && playback.episode != null &&
+            skipActions(playback.stream, position, duration, isEpisode = true, introDismissed = introSkipped).introTargetMs != null) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                revealControls()
+                focusIntroAction = true
+            }
+            return true
+        }
         val select = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (select && (selectingPlayback || (!showActions && !connecting && !serverPicker && error == null))) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {

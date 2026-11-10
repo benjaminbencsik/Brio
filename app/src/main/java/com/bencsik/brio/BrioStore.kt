@@ -7,6 +7,7 @@ import android.util.Base64
 import com.bencsik.brio.core.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CancellationException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -57,6 +58,29 @@ class BrioStore(context: Context) {
     var provider: String
         get() = secret("provider")
         set(value) = putSecret("provider", value.trim())
+    /** Extra direct links belong to one movie or one episode and remain on this device. */
+    private fun savedPersonalStreams(): Map<String, List<Stream>> = runCatching {
+        gson.fromJson<Map<String, List<Stream>>>(secret("personal_streams").ifEmpty { "{}" },
+            object : TypeToken<Map<String, List<Stream>>>() {}.type) ?: emptyMap()
+    }.getOrDefault(emptyMap())
+    fun personalStreams(playbackKey: String): List<Stream> = savedPersonalStreams()[playbackKey].orEmpty()
+    fun addPersonalStream(playbackKey: String, rawUrl: String): Stream {
+        require(rawUrl.length <= 2048) { "Video link is too long." }
+        val source = Stream(requireHttps(rawUrl), "My video link")
+        val saved = savedPersonalStreams()
+        val links = saved[playbackKey].orEmpty().filterNot { it.url == source.url }
+        require(links.size < 6) { "Remove an old link before adding another for this title." }
+        putSecret("personal_streams", gson.toJson((saved + (playbackKey to (links + source))).toList().takeLast(100).toMap()))
+        return source
+    }
+    suspend fun resolveSources(request: StreamRequest): List<Stream> {
+        val key = "${request.type}:${request.id}:${request.season ?: 0}:${request.episode ?: 0}"
+        val personal = personalStreams(key)
+        val online = try { resolveConfiguredSources(provider, tmdbToken, request) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (personal.isEmpty()) throw e else emptyList() }
+        return (online + personal).distinctBy { it.url to it.headers }
+    }
     var showContinueOnHome: Boolean
         get() = prefs.getBoolean("show_continue_home", true)
         set(value) { prefs.edit().putBoolean("show_continue_home", value).apply() }
