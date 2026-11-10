@@ -342,7 +342,7 @@ class PlayerActivity : ComponentActivity() {
                             if (playbackState == Player.STATE_READY && !pipMode) revealControls()
                             if (playbackState == Player.STATE_ENDED) {
                                 save()
-                                if (store.autoplayNext && next != null) playNext()
+                                maybeAutoplayNext()
                             }
                         }
                     }
@@ -406,8 +406,13 @@ class PlayerActivity : ComponentActivity() {
                     val nextSeason = api.details(playback.title).seasons.filter { it.number > season }.minByOrNull { it.number }
                     nextSeason?.let { s -> api.episodes(playback.title, s.number).firstOrNull()?.let { s.number to it.number } }
                 }
+                // The video can end while the catalog request is still in flight.
+                maybeAutoplayNext()
             } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Playback remains usable when catalog is offline. */ }
         }
+    }
+    private fun maybeAutoplayNext() {
+        if (finished && store.autoplayNext && next != null && !loadingNext) playNext()
     }
     private fun playNext() {
         if (loadingNext) return

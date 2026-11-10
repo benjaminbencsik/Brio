@@ -85,7 +85,7 @@ class BrioStore(context: Context) {
         get() = prefs.getBoolean("show_continue_home", true)
         set(value) { prefs.edit().putBoolean("show_continue_home", value).apply() }
     var autoplayNext: Boolean
-        get() = prefs.getBoolean("autoplay_next", false)
+        get() = prefs.getBoolean("autoplay_next", true)
         set(value) { prefs.edit().putBoolean("autoplay_next", value).apply() }
     var autoSkipIntro: Boolean
         get() = prefs.getBoolean("auto_skip_intro", false)
