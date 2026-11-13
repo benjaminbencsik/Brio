@@ -172,13 +172,14 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     }
     Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (!tv) Box(Modifier.fillMaxWidth().background(Color(0xFF15191F)), contentAlignment = Alignment.Center) {
-                Row(Modifier.widthIn(max = 820.dp).fillMaxWidth().height(70.dp)
+            if (!tv) Box(Modifier.fillMaxWidth().background(Color(0xFF15191F)).navigationBarsPadding(),
+                contentAlignment = Alignment.Center) {
+                Row(Modifier.widthIn(max = 820.dp).fillMaxWidth().height(62.dp)
                     .padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tabs.forEachIndexed { index, label ->
                         val selected = tab == label
                         TextButton(onClick = { navigate(label) }, modifier = Modifier.weight(1f).fillMaxHeight()
-                            .padding(vertical = 5.dp, horizontal = 2.dp).focusRing(),
+                            .padding(vertical = 3.dp, horizontal = 2.dp).focusRing(),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.textButtonColors(containerColor = if (selected) Slate else Color.Transparent,
                                 contentColor = if (selected) Color.White else Muted),
@@ -769,7 +770,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.9 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.10 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {
