@@ -112,4 +112,14 @@ class BuiltinSourcesTest {
             assertEquals(listOf(1, 2), repo.episodes(show, 1).map { it.number })
         }
     }
+    @Test fun publicCatalogKeepsSeriesTypeWhenListedAmongMovies() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(
+                """{"metas":[{"moviedb_id":"1399","imdb_id":"tt0944947","name":"Test show","type":"series"}]}"""
+            ))
+            val title = CinemetaRepository(apiBase = server.url("/").toString()).catalog("movie").single()
+            assertEquals("tv", title.kind)
+        }
+    }
+
 }

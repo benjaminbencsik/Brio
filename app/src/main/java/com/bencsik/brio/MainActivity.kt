@@ -232,7 +232,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
                             state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, compact, play) { showLink = true } }
-                            tab == "Home" -> HomeScreen(state, wide, compact, vm.store.showContinueOnHome, vm::select, { vm.watch(it, play) }, play) { label, shelfKind, genre ->
+                            tab == "Home" -> HomeScreen(state, wide, compact, vm.store.showContinueOnHome, vm::select, { vm.watch(it, play) }, play, { navigate("Continue") }) { label, shelfKind, genre ->
                                 kind = shelfKind; categoryLabel = label; categoryGenre = genre; categoryParent = "Home"
                                 tab = "Category"; vm.browse(kind, genre = genre)
                             }
@@ -309,18 +309,46 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
 }
 
 @Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, showContinue: Boolean, info: (Title) -> Unit,
-    watch: (Title) -> Unit, resume: (Playback) -> Unit, all: (String, String, String?) -> Unit) {
-    if ((state.loading || state.homeLoading) && state.titles.isEmpty() && state.homeRows.isEmpty()) { Busy(); return }
-    if (state.titles.isEmpty() && state.homeRows.values.all { it.isEmpty() }) {
+    watch: (Title) -> Unit, resume: (Playback) -> Unit, onContinue: () -> Unit, all: (String, String, String?) -> Unit) {
+    val inProgress = state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
+    val visibleProgress = showContinue && inProgress.isNotEmpty()
+    if ((state.loading || state.homeLoading) && state.titles.isEmpty() && state.homeRows.isEmpty() &&
+        !visibleProgress && state.watchlist.isEmpty()) { Busy(); return }
+    if (state.titles.isEmpty() && state.homeRows.values.all { it.isEmpty() } &&
+        !visibleProgress && state.watchlist.isEmpty()) {
         EmptyState("Your next watch", "The public catalog could not load. Retry or check your connection."); return
     }
     var featuredIndex by rememberSaveable { mutableIntStateOf(0) }
     val featured = state.titles.take(6)
-    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(30.dp)) {
+    LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        if (visibleProgress) item(key = "continue") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Continue watching", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                    TextButton(onClick = onContinue, modifier = Modifier.focusRing()) { Text("See all →") }
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(inProgress, key = { it.playback.key }) { history ->
+                        Column(Modifier.width(if (wide) 170.dp else 132.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Poster(history.playback.title) { resume(history.playback) }
+                            val episode = history.playback.episode
+                            Text(if (episode != null) "S${history.playback.season} E$episode · ${history.positionMs / 60000} min watched"
+                                else "${history.positionMs / 60000} min watched",
+                                color = Muted, style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (history.durationMs > 0) LinearProgressIndicator(
+                                progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
+        }
         if (featured.isNotEmpty()) item {
             val title = featured[featuredIndex.coerceAtMost(featured.lastIndex)]
             Box(Modifier.fillMaxWidth().padding(horizontal = if (wide) 16.dp else 0.dp)
-                .height(if (compact) 260.dp else if (wide) 410.dp else 380.dp)
+                .height(if (compact) 260.dp else if (wide) 410.dp else 320.dp)
                 .clip(RoundedCornerShape(if (wide) 20.dp else 0.dp)).background(Slate)) {
                 (title.backdrop ?: title.poster)?.let { AsyncImage(it, title.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Night.copy(alpha = 0.92f), Night.copy(alpha = 0.47f), Color.Transparent))))
@@ -352,21 +380,6 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                             colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text(if (state.resolving) "Loading…" else "▶ Play", fontWeight = FontWeight.Bold) }
                         Button(onClick = { info(title) }, modifier = Modifier.focusRing(), shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Slate, contentColor = Color.White)) { Text("ⓘ Info") }
-                    }
-                }
-            }
-        }
-        if (showContinue && state.history.any { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Continue watching", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }, key = { it.playback.key }) { history ->
-                            Column(Modifier.width(if (wide) 170.dp else 132.dp)) {
-                                Poster(history.playback.title) { resume(history.playback) }
-                                if (history.durationMs > 0) LinearProgressIndicator(progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                            }
-                        }
                     }
                 }
             }
@@ -770,7 +783,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.10 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.11 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

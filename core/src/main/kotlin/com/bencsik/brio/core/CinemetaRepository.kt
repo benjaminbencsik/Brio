@@ -93,7 +93,12 @@ class CinemetaRepository(
     private fun title(json: JsonObject, kind: String): Title? {
         val id = json.text("moviedb_id").toIntOrNull()?.takeIf { it > 0 } ?: return null
         val imdb = json.text("imdb_id").ifBlank { json.text("id") }.takeIf { Regex("tt[0-9]+").matches(it) }
-        return Title(id, kind, json.text("name"), json.text("description"),
+        val actualKind = when (json.text("type")) {
+            "series", "tv" -> "tv"
+            "movie" -> "movie"
+            else -> kind
+        }
+        return Title(id, actualKind, json.text("name"), json.text("description"),
             json.text("poster").takeIf { it.isNotBlank() }, json.text("background").takeIf { it.isNotBlank() },
             json.text("year").ifBlank { json.text("releaseInfo") }.take(4),
             json.text("imdbRating").toDoubleOrNull() ?: 0.0, imdbId = imdb)

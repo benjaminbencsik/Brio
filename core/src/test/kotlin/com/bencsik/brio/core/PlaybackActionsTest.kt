@@ -1,5 +1,6 @@
 package com.bencsik.brio.core
 import kotlin.test.*
+import kotlinx.coroutines.test.runTest
 class PlaybackActionsTest {
     private val marked = Stream("https://example.com/video.mp4", introStartMs = 30000, introEndMs = 90000, creditsStartMs = 600000)
     @Test fun showsIntroOnlyInsideItsSegment() {
@@ -33,5 +34,16 @@ class PlaybackActionsTest {
         val episodes = listOf(Episode(4, "Four", ""), Episode(1, "One", ""), Episode(3, "Three", ""))
         assertEquals(3, followingEpisode(episodes, 1)?.number)
         assertNull(followingEpisode(episodes, 4))
+    }
+    @Test fun nextEpisodeCrossesSeasonBoundaryAndSkipsEmptySeason() = runTest {
+        val episodes = mapOf(
+            1 to listOf(Episode(2, "Two", ""), Episode(1, "One", "")),
+            2 to emptyList(),
+            3 to listOf(Episode(2, "Two", ""), Episode(1, "One", ""))
+        )
+        val seasons: suspend () -> List<Season> = { listOf(Season(3, "Three"), Season(1, "One"), Season(2, "Two")) }
+        assertEquals(1 to 2, followingEpisodeTarget(1, 1, { episodes[it].orEmpty() }, seasons))
+        assertEquals(3 to 1, followingEpisodeTarget(1, 2, { episodes[it].orEmpty() }, seasons))
+        assertNull(followingEpisodeTarget(3, 2, { episodes[it].orEmpty() }, seasons))
     }
 }

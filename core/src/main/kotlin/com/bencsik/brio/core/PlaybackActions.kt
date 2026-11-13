@@ -23,3 +23,15 @@ fun skipActions(stream: Stream, positionMs: Long, durationMs: Long,
     return SkipActions(intro, target, credits, estimatedIntro)
 }
 fun followingEpisode(episodes: List<Episode>, current: Int): Episode? = episodes.filter { it.number > current }.minByOrNull { it.number }
+
+/** Resolve the following episode, including season boundaries and empty seasons. */
+suspend fun followingEpisodeTarget(season: Int, episode: Int,
+    episodes: suspend (Int) -> List<Episode>, seasons: suspend () -> List<Season>): Pair<Int, Int>? {
+    followingEpisode(episodes(season), episode)?.let { return season to it.number }
+    for (nextSeason in seasons().map { it.number }.filter { it > season }.sorted()) {
+        episodes(nextSeason).filter { it.number > 0 }.minByOrNull { it.number }?.let {
+            return nextSeason to it.number
+        }
+    }
+    return null
+}

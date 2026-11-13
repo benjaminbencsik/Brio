@@ -68,6 +68,8 @@ class PlayerActivity : ComponentActivity() {
     private var error by mutableStateOf<String?>(null)
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
     private var nextLoading by mutableStateOf(false)
+    private var nextLookupFailed by mutableStateOf(false)
+    private var retriedNextLookup = false
     private var finished by mutableStateOf(false)
     private var introSkipped by mutableStateOf(false)
     private val introFocusRequester = FocusRequester()
@@ -156,8 +158,9 @@ class PlayerActivity : ComponentActivity() {
                             seek(target)
                         }
                     }
-                    LaunchedEffect(intro, credits, nearEnd, finished, connecting) {
-                        if (!pipMode && !connecting && (intro || credits || (next != null && (nearEnd || finished)))) revealControls()
+                    LaunchedEffect(intro, credits, nearEnd, finished, connecting, nextLookupFailed, next) {
+                        if (!pipMode && !connecting && (intro || credits || (next != null && (nearEnd || finished)) ||
+                            (finished && nextLookupFailed))) revealControls()
                     }
                     LaunchedEffect(focusIntroAction, intro, showActions, connecting) {
                         if (focusIntroAction && intro && showActions && !connecting) {
@@ -165,13 +168,18 @@ class PlayerActivity : ComponentActivity() {
                             focusIntroAction = false
                         }
                     }
-                    if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)) ||
+                        (finished && nextLookupFailed))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (intro) Button(onClick = { introSkipped = true; seek(actions.introTargetMs!!) },
                             modifier = Modifier.focusRequester(introFocusRequester).focusRing()) {
                             Text(if (actions.introIsEstimated) "Skip intro · +90s" else "Skip intro")
                         }
                         if (credits && actions.creditsTargetMs != null) OutlinedButton(onClick = { seek(actions.creditsTargetMs!!) }, modifier = Modifier.focusRing()) { Text("Skip credits") }
                         if (next != null && (credits || nearEnd || finished)) Button(onClick = ::playNext, enabled = !nextLoading, modifier = Modifier.focusRing()) { Text(if (nextLoading) "Loading next…" else "Next episode ▶") }
+                        if (finished && nextLookupFailed) OutlinedButton(onClick = {
+                            retriedNextLookup = true
+                            loadNextInfo()
+                        }, modifier = Modifier.focusRing()) { Text("Retry next episode lookup") }
                     }
                     if (pipMode) {
                         // Only the video surface remains visible in the system PiP window.
@@ -395,24 +403,37 @@ class PlayerActivity : ComponentActivity() {
     private fun loadNextInfo() {
         nextInfoJob?.cancel()
         next = null
+        nextLookupFailed = false
         val season = playback.season ?: return
         val episode = playback.episode ?: return
+        val title = playback.title
         nextInfoJob = lifecycleScope.launch {
             try {
                 val api = BrioCatalog(store.tmdbToken)
-                val current = api.episodes(playback.title, season)
-                val following = followingEpisode(current, episode)
-                next = if (following != null) season to following.number else {
-                    val nextSeason = api.details(playback.title).seasons.filter { it.number > season }.minByOrNull { it.number }
-                    nextSeason?.let { s -> api.episodes(playback.title, s.number).firstOrNull()?.let { s.number to it.number } }
-                }
+                next = followingEpisodeTarget(season, episode,
+                    episodes = { api.episodes(title, it) },
+                    seasons = { api.details(title).seasons })
                 // The video can end while the catalog request is still in flight.
                 maybeAutoplayNext()
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Playback remains usable when catalog is offline. */ }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                nextLookupFailed = true
+                maybeAutoplayNext()
+            }
         }
     }
     private fun maybeAutoplayNext() {
-        if (finished && store.autoplayNext && next != null && !loadingNext) playNext()
+        if (!finished || !store.autoplayNext || loadingNext) return
+        if (next != null) {
+            playNext()
+        } else if (nextLookupFailed && !retriedNextLookup) {
+            retriedNextLookup = true
+            val episodeKey = playback.key
+            lifecycleScope.launch {
+                delay(1500)
+                if (finished && playback.key == episodeKey && next == null && nextInfoJob?.isActive != true) loadNextInfo()
+            }
+        }
     }
     private fun playNext() {
         if (loadingNext) return
@@ -427,6 +448,7 @@ class PlayerActivity : ComponentActivity() {
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
                 resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false
+                retriedNextLookup = false
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) startPlayer()
                 loadNextInfo()
             } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Couldn't load the next episode." }
