@@ -30,8 +30,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -170,9 +172,9 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     }
     Scaffold(containerColor = Night, snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            Box(Modifier.fillMaxWidth().background(Color(0xFF15191F)), contentAlignment = Alignment.Center) {
-                Row(Modifier.widthIn(max = 820.dp).fillMaxWidth().height(if (tv) 64.dp else 70.dp)
-                    .padding(horizontal = if (tv) 12.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!tv) Box(Modifier.fillMaxWidth().background(Color(0xFF15191F)), contentAlignment = Alignment.Center) {
+                Row(Modifier.widthIn(max = 820.dp).fillMaxWidth().height(70.dp)
+                    .padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tabs.forEachIndexed { index, label ->
                         val selected = tab == label
                         TextButton(onClick = { navigate(label) }, modifier = Modifier.weight(1f).fillMaxHeight()
@@ -192,28 +194,38 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 }
             }
         }) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+        Row(Modifier.fillMaxSize().padding(padding)) {
+            if (tv) TvNavigationRail(tab, categoryParent, ::navigate)
+            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val wide = maxWidth > 600.dp
             val compact = tv || maxHeight < 580.dp
             Column(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxWidth().height(if (compact) 56.dp else 64.dp)
                         .background(Night).padding(horizontal = if (wide) 24.dp else 12.dp)) {
-                        Box(Modifier.align(Alignment.CenterStart)) {
+                        if (tv) Text(
+                            if (tab == "Continue") "Continue watching" else if (tab == "Category") categoryLabel else tab,
+                            modifier = Modifier.align(Alignment.CenterStart),
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                        Box(Modifier.align(if (tv) Alignment.CenterEnd else Alignment.CenterStart)) {
                             TextButton(onClick = { menu = true }, modifier = Modifier.focusRing()
                                 .semantics { contentDescription = "More options" }) {
-                                Text(if (wide) "☰  More" else "☰", color = Color.White)
+                                Text(if (tv) "⋯  More" else if (wide) "☰  More" else "☰", color = Color.White)
                             }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                DropdownMenuItem(text = { Text("Continue watching") }, onClick = { menu = false; navigate("Continue") }, modifier = Modifier.focusRing())
+                                if (!tv) DropdownMenuItem(text = { Text("Continue watching") }, onClick = { menu = false; navigate("Continue") }, modifier = Modifier.focusRing())
                                 DropdownMenuItem(text = { Text("Real-Debrid") }, onClick = { menu = false; navigate("Debrid") }, modifier = Modifier.focusRing())
                                 DropdownMenuItem(text = { Text("Open link") }, onClick = { menu = false; showLink = true }, modifier = Modifier.focusRing())
                                 if (!tv) DropdownMenuItem(text = { Text("Local file") }, onClick = { menu = false; local() }, modifier = Modifier.focusRing())
                             }
                         }
-                        Box(Modifier.align(Alignment.Center)) { Brand() }
-                        TextButton(onClick = { navigate("Search") }, modifier = Modifier.align(Alignment.CenterEnd).focusRing()
-                            .semantics { contentDescription = "Search movies and shows" }) {
-                            Text(if (wide) "⌕  Search" else "⌕", color = Color.White)
+                        if (!tv) {
+                            Box(Modifier.align(Alignment.Center)) { Brand() }
+                            TextButton(onClick = { navigate("Search") }, modifier = Modifier.align(Alignment.CenterEnd).focusRing()
+                                .semantics { contentDescription = "Search movies and shows" }) {
+                                Text(if (wide) "⌕  Search" else "⌕", color = Color.White)
+                            }
                         }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -246,9 +258,53 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                         }
                     }
             }
+            }
         }
     }
     if (showLink) LinkDialog(sharedLink, vm, state.resolving, { showLink = false; clearShared() }, play)
+}
+
+@Composable
+private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (String) -> Unit) {
+    val narrow = LocalConfiguration.current.screenWidthDp < 760
+    val destinations = listOf(
+        Triple("Home", "⌂", "Home"),
+        Triple("Continue", "↺", "Continue watching"),
+        Triple("Movies", "▶", "Movies"),
+        Triple("TV Shows", "▣", "TV Shows"),
+        Triple("My List", "♡", "My List"),
+        Triple("Settings", "⚙", "Settings"),
+        Triple("Search", "⌕", "Search")
+    )
+    Column(
+        Modifier.width(if (narrow) 120.dp else 156.dp).fillMaxHeight()
+            .background(Color(0xFF10151E)).verticalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(Modifier.fillMaxWidth().padding(start = 6.dp, top = 6.dp, bottom = 18.dp)) { Brand() }
+        destinations.forEach { (destination, icon, label) ->
+            val selected = tab == destination || (tab == "Category" && categoryParent == destination)
+            TextButton(
+                onClick = { navigate(destination) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).focusRing()
+                    .semantics { contentDescription = label },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = if (selected) Slate else Color.Transparent,
+                    contentColor = if (selected) Color.White else Muted
+                ),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(icon, color = if (selected) Lime else Muted, style = MaterialTheme.typography.titleMedium)
+                    Text(if (narrow && destination == "Continue") "Continue" else label,
+                        style = MaterialTheme.typography.labelMedium, maxLines = 2)
+                }
+            }
+        }
+    }
 }
 
 @Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, showContinue: Boolean, info: (Title) -> Unit,
@@ -713,7 +769,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.8 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.9 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {
