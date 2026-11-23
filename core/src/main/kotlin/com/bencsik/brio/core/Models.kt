@@ -18,8 +18,8 @@ data class Episode(val number: Int, val name: String, val overview: String)
 data class Season(val number: Int, val name: String)
 data class Details(val title: Title, val seasons: List<Season> = emptyList())
 data class StreamRequest(val id: Int, val type: String, val season: Int? = null, val episode: Int? = null, val imdbId: String? = null)
-data class Stream(val url: String, val name: String = "Source", val quality: String = "Auto", val headers: Map<String, String> = emptyMap(), val introStartMs: Long? = null, val introEndMs: Long? = null, val creditsStartMs: Long? = null, val creditsEndMs: Long? = null, val requiresDebrid: Boolean = false, val mimeType: String? = null)
-data class Playback(val title: Title, val stream: Stream, val season: Int? = null, val episode: Int? = null, val alternatives: List<Stream>? = null) {
+data class Stream(val url: String, val name: String = "Source", val quality: String = "Auto", val headers: Map<String, String> = emptyMap(), val introStartMs: Long? = null, val introEndMs: Long? = null, val creditsStartMs: Long? = null, val creditsEndMs: Long? = null, val requiresDebrid: Boolean = false)
+data class Playback(val title: Title, val stream: Stream, val season: Int? = null, val episode: Int? = null, val alternatives: List<Stream>? = null, val startOver: Boolean = false) {
     val key: String get() = "${title.key}:${season ?: 0}:${episode ?: 0}"
     val label: String get() = title.name + if (season != null && episode != null) " · S$season E$episode" else ""
 }
@@ -34,3 +34,4 @@ object DemoCatalog {
         Title(-4, name = "Elephants Dream", overview = "Two characters explore a strange mechanical world. The Blender Foundation's first open movie.", year = "2006", demoUrl = BASE + "ElephantsDream.mp4")
     )
 }
+

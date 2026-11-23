@@ -40,6 +40,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -278,6 +280,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 
 @Composable
 private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (String) -> Unit) {
+    val initialFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { initialFocus.requestFocus() }
     val narrow = LocalConfiguration.current.screenWidthDp < 760
     val destinations = listOf(
         Triple("Home", "⌂", "Home"),
@@ -299,7 +303,8 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
             val selected = tab == destination || (tab == "Category" && categoryParent == destination)
             TextButton(
                 onClick = { navigate(destination) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).focusRing()
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                    .then(if (destination == "Home") Modifier.focusRequester(initialFocus) else Modifier).focusRing()
                     .semantics { contentDescription = label },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.textButtonColors(
@@ -642,9 +647,13 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
         item { TextButton(onClick = clear, modifier = Modifier.focusRing()) { Text("Clear watch history") } }
         items(inProgress, key = { it.playback.key }) { history ->
-            Card(onClick = { play(history.playback) }, modifier = Modifier.fillMaxWidth().focusRing(), colors = CardDefaults.cardColors(containerColor = Slate)) {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("▶  ${history.playback.label}", fontWeight = FontWeight.Bold)
+                    Text(history.playback.label, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { play(history.playback.copy(startOver = false)) }, modifier = Modifier.focusRing()) { Text("Resume") }
+                        OutlinedButton(onClick = { play(history.playback.copy(startOver = true)) }, modifier = Modifier.focusRing()) { Text("Start over") }
+                    }
                     Text("${history.positionMs / 60000} min watched", color = Muted)
                     if (history.durationMs > 0) LinearProgressIndicator(progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 }
@@ -823,7 +832,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.13 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.14 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

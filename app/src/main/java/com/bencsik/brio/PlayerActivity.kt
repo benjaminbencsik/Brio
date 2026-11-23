@@ -36,6 +36,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -64,6 +66,10 @@ class PlayerActivity : ComponentActivity() {
     private var duration by mutableLongStateOf(0)
     private var showActions by mutableStateOf(true)
     private var controlsTimer: Job? = null
+    private var tracks by mutableStateOf(Tracks.EMPTY)
+    private var trackPicker by mutableStateOf(false)
+    private val trackPrefs by lazy { getSharedPreferences("playback_tracks", MODE_PRIVATE) }
+    private var failedSource by mutableStateOf<String?>(null)
     private var error by mutableStateOf<String?>(null)
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
     private var nextLoading by mutableStateOf(false)
@@ -111,6 +117,7 @@ class PlayerActivity : ComponentActivity() {
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
+                trackPicker -> { trackPicker = false; revealControls() }
                 addServer -> addServer = false
                 serverPicker -> serverPicker = false
                 episodePicker -> closeEpisodePicker()
@@ -123,7 +130,7 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         servers = (listOf(playback.stream) + playback.alternatives.orEmpty()).distinctBy { it.url to it.headers }
-        resumePosition = savedInstanceState?.getLong("position") ?: store.history().firstOrNull { it.playback.key == playback.key }?.let {
+        resumePosition = savedInstanceState?.getLong("position") ?: (if (playback.startOver) 0L else null) ?: store.history().firstOrNull { it.playback.key == playback.key }?.let {
             if (it.durationMs > 0 && it.positionMs >= it.durationMs - 5000) 0L else it.positionMs
         } ?: 0L
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -211,7 +218,8 @@ class PlayerActivity : ComponentActivity() {
                                 verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 CircularProgressIndicator()
                                 Text(if (countdown > 0) "Trying another server…" else "Connecting to server ${serverIndex + 1}…", color = Color.White)
-                                Text("Looking for a working server. You can also choose one below.", color = Color.LightGray)
+                                Text(failedSource?.let { "$it failed. Trying to resume from your last position." }
+                                    ?: "Looking for a working server. You can also choose one below.", color = Color.LightGray)
                                 OutlinedButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Try different server") }
                             }
                         }
@@ -221,6 +229,7 @@ class PlayerActivity : ComponentActivity() {
                             TextButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Servers · ${servers.size}") }
                             if (playback.season != null && playback.episode != null)
                                 TextButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Seasons & episodes") }
+                            TextButton(onClick = { trackPicker = true }, modifier = Modifier.focusRing()) { Text("Audio & subtitles") }
                             if (pipSupported && exo?.playbackState == Player.STATE_READY)
                                 OutlinedButton(onClick = ::minimize, modifier = Modifier.focusRing()) { Text("▣ Minimize") }
                         }
@@ -240,6 +249,33 @@ class PlayerActivity : ComponentActivity() {
                         if (playback.season != null && playback.episode != null)
                             OutlinedButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Episodes") }
                     }
+                    if (!pipMode && trackPicker) AlertDialog(
+                        onDismissRequest = { trackPicker = false; revealControls() },
+                        title = { Text("Audio & subtitles") },
+                        text = {
+                            LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                                for (type in listOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_TEXT)) {
+                                    item { Text(if (type == C.TRACK_TYPE_AUDIO) "Audio" else "Subtitles") }
+                                    item {
+                                        TextButton(onClick = { chooseTrack(type, null, 0, type == C.TRACK_TYPE_TEXT) },
+                                            modifier = Modifier.focusRing()) { Text(if (type == C.TRACK_TYPE_AUDIO) "Automatic" else "Off") }
+                                    }
+                                    val groups = tracks.groups.filter { it.type == type }
+                                    for ((groupIndex, group) in groups.withIndex()) for (index in 0 until group.length) {
+                                        if (!group.isTrackSupported(index)) continue
+                                        item {
+                                            val format = group.getTrackFormat(index)
+                                            val name = format.label ?: format.language ?: "Track ${groupIndex + 1}.${index + 1}"
+                                            TextButton(onClick = { chooseTrack(type, group, index) }, modifier = Modifier.focusRing()) {
+                                                Text(if (group.isTrackSelected(index)) "✓ $name" else name)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = { TextButton(onClick = { trackPicker = false; revealControls() }, modifier = Modifier.focusRing()) { Text("Done") } }
+                    )
                     if (!pipMode && serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
                         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (servers.size == 1) Text("Only one source returned a video for this title. Add a direct link here or add provider endpoints in Settings → Sources.")
@@ -310,7 +346,7 @@ class PlayerActivity : ComponentActivity() {
                     if (!pipMode) error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
                             confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
-                            dismissButton = { TextButton(onClick = { finish() }, modifier = Modifier.focusRing()) { Text("Back to sources") } })
+                            dismissButton = { TextButton(onClick = { error = null; serverPicker = true }, modifier = Modifier.focusRing()) { Text("Choose server") } })
                     }
                 }
             }
@@ -355,7 +391,7 @@ class PlayerActivity : ComponentActivity() {
     private fun tryServer(index: Int) {
         connectionJob?.cancel(); timeoutJob?.cancel()
         val generation = ++connectionGeneration
-        exo?.let { resumePosition = it.currentPosition; save() }
+        exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
         releasePlayer()
         serverIndex = index; attemptedServers.add(index)
         connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
@@ -384,11 +420,16 @@ class PlayerActivity : ComponentActivity() {
         timeoutJob?.cancel()
         // Invalidate callbacks from this failed player before releasing it.
         val failedGeneration = ++connectionGeneration
-        exo?.let { resumePosition = it.currentPosition }; releasePlayer()
+        failedSource = servers.getOrNull(serverIndex)?.name
+        exo?.let {
+            if (it.currentPosition > 0) resumePosition = it.currentPosition
+            resumePlay = it.playWhenReady
+        }
+        releasePlayer()
         val nextServer = nextUntriedServer(servers.size, serverIndex, attemptedServers)
         if (nextServer == null) {
             connecting = false; countdown = 0
-            error = "None of the available servers could play this video. Retry, choose a server, or return to browsing."
+            error = "${failedSource ?: "The source"} couldn’t play this video. Retry or choose a server to resume at your last position."
             return
         }
         connecting = true
@@ -409,12 +450,19 @@ class PlayerActivity : ComponentActivity() {
             .setSeekBackIncrementMs(30_000)
             .setSeekForwardIncrementMs(30_000)
             .build()
+        tracks = Tracks.EMPTY
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguage(trackPrefs.getString("audio", null))
+            .setPreferredTextLanguage(trackPrefs.getString("text", null))
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, trackPrefs.getBoolean("text_off", false))
+            .build()
         exo = player
         mediaSession = MediaSession.Builder(this, player).build()
         player.apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
             setHandleAudioBecomingNoisy(true)
             addListener(object : Player.Listener {
+                override fun onTracksChanged(newTracks: Tracks) { tracks = newTracks }
                 override fun onPlayerError(playbackError: PlaybackException) { serverFailed(generation) }
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (generation != connectionGeneration) return
@@ -422,7 +470,7 @@ class PlayerActivity : ComponentActivity() {
                     when (playbackState) {
                         Player.STATE_BUFFERING -> armTimeout(generation)
                         Player.STATE_READY, Player.STATE_ENDED -> {
-                            timeoutJob?.cancel(); connecting = false; countdown = 0
+                            timeoutJob?.cancel(); connecting = false; countdown = 0; failedSource = null
                             if (playbackState == Player.STATE_READY && !pipMode) revealControls()
                             if (playbackState == Player.STATE_ENDED) {
                                 save()
@@ -438,7 +486,7 @@ class PlayerActivity : ComponentActivity() {
             prepare(); playWhenReady = resumePlay
         }
     }
-    private fun save() { exo?.let { player -> store.saveProgress(playback, player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0) } }
+    private fun save() { exo?.let { player -> store.saveProgress(playback.copy(startOver = false), player.currentPosition, player.duration.takeIf { it != C.TIME_UNSET } ?: 0) } }
     private fun releasePlayer() {
         mediaSession?.release(); mediaSession = null
         playerView?.player = null
@@ -468,12 +516,29 @@ class PlayerActivity : ComponentActivity() {
         controlsTimer?.cancel()
         controlsTimer = lifecycleScope.launch {
             delay(5000)
-            if (exo?.isPlaying == true && !serverPicker && !episodePicker && !addServer && error == null) {
+            if (exo?.isPlaying == true && !serverPicker && !episodePicker && !trackPicker && !addServer && error == null) {
                 showActions = false
                 playerView?.hideController()
                 playerView?.requestFocus()
             }
         }
+    }
+    private fun chooseTrack(type: Int, group: Tracks.Group?, index: Int, off: Boolean = false) {
+        val player = exo ?: return
+        val language = group?.getTrackFormat(index)?.language
+        val params = player.trackSelectionParameters.buildUpon().clearOverridesOfType(type)
+            .setTrackTypeDisabled(type, off)
+        val prefs = trackPrefs.edit()
+        if (type == C.TRACK_TYPE_AUDIO) {
+            params.setPreferredAudioLanguage(language)
+            prefs.putString("audio", language)
+        } else {
+            params.setPreferredTextLanguage(language)
+            prefs.putString("text", language).putBoolean("text_off", off)
+        }
+        if (group != null) params.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+        player.trackSelectionParameters = params.build()
+        prefs.apply()
     }
     private fun seek(target: Long) { exo?.seekTo(target.coerceAtLeast(0).let { if (duration > 0) it.coerceAtMost(duration) else it }) }
     private fun seekRelative(deltaMs: Long) { seek((exo?.currentPosition ?: position) + deltaMs) }
@@ -590,7 +655,7 @@ class PlayerActivity : ComponentActivity() {
     private fun handleTvVideoKey(event: KeyEvent): Boolean {
         val onVideo = playerView?.hasFocus() == true || !showActions
         if (television && onVideo && !pipMode && !connecting && !serverPicker &&
-            !episodePicker && !addServer && error == null) {
+            !episodePicker && !trackPicker && !addServer && error == null) {
             val key = event.keyCode
             if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
                 if (event.action == KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
