@@ -75,7 +75,12 @@ private val Muted = Color(0xFF9DA7B5)
 private val Gold = Color(0xFFFFC44D)
 private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
+private const val LayoutPrefs = "brio_layout"
 internal fun Context.isTelevisionDevice(): Boolean {
+    when (getSharedPreferences(LayoutPrefs, Context.MODE_PRIVATE).getString("mode", "Auto")) {
+        "TV" -> return true
+        "Phone" -> return false
+    }
     val mode = (getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType
     val configuredMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
     return mode == Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -680,6 +685,8 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     var newSource by rememberSaveable { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
+    val layoutPrefs = remember(context) { context.getSharedPreferences(LayoutPrefs, Context.MODE_PRIVATE) }
+    val layoutMode = layoutPrefs.getString("mode", "Auto") ?: "Auto"
     var section by rememberSaveable { mutableStateOf("Experience") }
     var showContinue by remember { mutableStateOf(vm.store.showContinueOnHome) }
     var autoplay by remember { mutableStateOf(vm.store.autoplayNext) }
@@ -728,7 +735,17 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 }
             } }
             item { SettingsPanel("Display", "A calm, cinema-first layout for phone, tablet, and TV.") {
-                Text("Posters show ratings, while your remote focus stays visible on every control.", color = Muted)
+                Text("Choose the left rail for TV or bottom tabs for Phone.", color = Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Auto", "TV", "Phone").forEach { mode ->
+                        FilterChip(selected = layoutMode == mode, onClick = {
+                            if (layoutMode != mode) {
+                                layoutPrefs.edit().putString("mode", mode).apply()
+                                (context as? MainActivity)?.recreate()
+                            }
+                        }, label = { Text(mode) }, modifier = Modifier.focusRing())
+                    }
+                }
             } }
         }
         if (section == "Playback") {
@@ -832,7 +849,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.15 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.16 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

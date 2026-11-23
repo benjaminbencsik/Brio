@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -204,7 +205,7 @@ class PlayerActivity : ComponentActivity() {
                         }
                     }
                     if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)) ||
-                        (finished && nextLookupFailed))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        (finished && nextLookupFailed))) Row(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = if (television && duration > 0) 154.dp else 110.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (intro) Button(onClick = { introSkipped = true; seek(actions.introTargetMs!!) },
                             modifier = Modifier.focusRequester(introFocusRequester).focusRing()) {
                             Text(if (actions.introIsEstimated) "Skip intro · +90s" else "Skip intro")
@@ -243,8 +244,44 @@ class PlayerActivity : ComponentActivity() {
                                 OutlinedButton(onClick = ::minimize, modifier = Modifier.focusRing()) { Text("▣ Minimize") }
                         }
                     }
-                    if (television && showActions && !pipMode && !connecting) Row(
-                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp),
+                    if (television && showActions && !pipMode && !connecting) Column(
+                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 28.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (duration > 0 && player?.isCurrentMediaItemSeekable == true) {
+                            val total = duration
+                            var pending by remember(playback.key, stream.url) { mutableStateOf<Float?>(null) }
+                            val shown = (pending?.let { (it * total).toLong() } ?: position).coerceIn(0, total)
+                            Column(Modifier.widthIn(max = 620.dp).fillMaxWidth()) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(playbackTime(shown), color = Color.White)
+                                    Text("−" + playbackTime(total - shown), color = Color.White)
+                                }
+                                Slider(
+                                    value = shown.toFloat() / total,
+                                    onValueChange = { pending = it; revealControls() },
+                                    onValueChangeFinished = { pending?.let { seek((it * total).toLong()) }; pending = null },
+                                    modifier = Modifier.fillMaxWidth().focusRing().onPreviewKeyEvent { event ->
+                                        val native = event.nativeKeyEvent
+                                        val direction = when (native.keyCode) {
+                                            KeyEvent.KEYCODE_DPAD_LEFT -> -1
+                                            KeyEvent.KEYCODE_DPAD_RIGHT -> 1
+                                            else -> 0
+                                        }
+                                        if (direction == 0) false else {
+                                            if (native.action == KeyEvent.ACTION_DOWN) {
+                                                seekRelative((total / 20).coerceAtLeast(10_000L) * direction)
+                                                position = exo?.currentPosition ?: position
+                                                revealControls()
+                                            }
+                                            true
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        Row(
+                        Modifier,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -257,6 +294,7 @@ class PlayerActivity : ComponentActivity() {
                         OutlinedButton(onClick = { seekRelative(30_000); revealControls() }, modifier = Modifier.focusRing()) { Text("+30s") }
                         if (playback.season != null && playback.episode != null)
                             OutlinedButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Episodes") }
+                    }
                     }
                     if (!pipMode && autoplaySeconds > 0) {
                         val cancelFocus = remember { FocusRequester() }
@@ -572,6 +610,12 @@ class PlayerActivity : ComponentActivity() {
         prefs.apply()
     }
     private fun seek(target: Long) { exo?.seekTo(target.coerceAtLeast(0).let { if (duration > 0) it.coerceAtMost(duration) else it }) }
+    private fun playbackTime(ms: Long): String {
+        val seconds = ms / 1000
+        val minutes = seconds / 60
+        val tail = (seconds % 60).toString().padStart(2, '0')
+        return if (minutes < 60) "$minutes:$tail" else "${minutes / 60}:${(minutes % 60).toString().padStart(2, '0')}:$tail"
+    }
     private fun seekRelative(deltaMs: Long) { seek((exo?.currentPosition ?: position) + deltaMs) }
     private fun togglePlayback() {
         exo?.let { if (it.isPlaying) it.pause() else it.play() }
