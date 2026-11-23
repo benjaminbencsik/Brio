@@ -52,7 +52,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun dismissError() = update { it.copy(error = null) }
     fun reload() { refreshLibrary(); browse(lastKind, lastQuery, genre = lastGenre) }
-    fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history(),
+    fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history(), hiddenContinue = store.hiddenContinueKeys(),
         watchedEpisodes = (visibleCloudProgress(store.cloudRecords()).filter { r -> r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9 }.map { r -> r.key } +
             store.history().filter { h -> h.durationMs > 0 && h.positionMs >= h.durationMs * 0.9 }.map { h -> h.playback.key }).toSet()) }
     fun browse(kind: String = "movie", query: String = "", more: Boolean = false, genre: String? = null) {
@@ -260,6 +260,7 @@ data class UiState(
     val error: String? = null, val notice: String? = null,
     val selected: Details? = null, val season: Int? = null, val episode: Int? = null, val episodes: List<Episode> = emptyList(),
     val streams: List<Stream> = emptyList(), val resolving: Boolean = false,
+    val hiddenContinue: Set<String> = emptySet(),
     val watchlist: List<Title> = emptyList(), val history: List<History> = emptyList(), val watchedEpisodes: Set<String> = emptySet(),
     val categoryRows: Map<String, List<Title>> = emptyMap(), val categoriesLoading: Boolean = false, val categoryError: String? = null,
     val homeRows: Map<String, List<Title>> = emptyMap(), val homeLoading: Boolean = false,

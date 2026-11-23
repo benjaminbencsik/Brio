@@ -75,6 +75,14 @@ class PlayerActivity : ComponentActivity() {
     private var nextLoading by mutableStateOf(false)
     private var nextLookupFailed by mutableStateOf(false)
     private var retriedNextLookup = false
+    private var autoplaySeconds by mutableIntStateOf(0)
+    private var autoplayJob: Job? = null
+    private var autoplayDismissed = false
+    private fun cancelAutoplay() {
+        autoplayDismissed = true
+        autoplayJob?.cancel()
+        autoplaySeconds = 0
+    }
     private var finished by mutableStateOf(false)
     private var introSkipped by mutableStateOf(false)
     private val introFocusRequester = FocusRequester()
@@ -117,6 +125,7 @@ class PlayerActivity : ComponentActivity() {
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
+                autoplaySeconds > 0 -> cancelAutoplay()
                 trackPicker -> { trackPicker = false; revealControls() }
                 addServer -> addServer = false
                 serverPicker -> serverPicker = false
@@ -249,6 +258,20 @@ class PlayerActivity : ComponentActivity() {
                         if (playback.season != null && playback.episode != null)
                             OutlinedButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Episodes") }
                     }
+                    if (!pipMode && autoplaySeconds > 0) {
+                        val cancelFocus = remember { FocusRequester() }
+                        AlertDialog(
+                            onDismissRequest = ::cancelAutoplay,
+                            title = { Text("Next episode in ${autoplaySeconds}s") },
+                            text = { next?.let { Text("Season ${it.first}, Episode ${it.second}") } },
+                            confirmButton = { Button(onClick = ::playNext, modifier = Modifier.focusRing()) { Text("Play now") } },
+                            dismissButton = {
+                                TextButton(onClick = ::cancelAutoplay,
+                                    modifier = Modifier.focusRequester(cancelFocus).focusRing()) { Text("Cancel") }
+                                if (television) LaunchedEffect(Unit) { cancelFocus.requestFocus() }
+                            }
+                        )
+                    }
                     if (!pipMode && trackPicker) AlertDialog(
                         onDismissRequest = { trackPicker = false; revealControls() },
                         title = { Text("Audio & subtitles") },
@@ -369,9 +392,17 @@ class PlayerActivity : ComponentActivity() {
         pipMode = inPictureInPictureMode
         if (inPictureInPictureMode) {
             showActions = false; controlsTimer?.cancel(); playerView?.hideController()
-        } else revealControls()
+            if (autoplaySeconds > 0) {
+                autoplayJob?.cancel()
+                autoplaySeconds = 0
+            }
+        } else {
+            revealControls()
+            maybeAutoplayNext()
+        }
     }
     override fun onStop() {
+        cancelAutoplay()
         controlsTimer?.cancel()
         episodeInfoJob?.cancel(); episodeSeasonsJob?.cancel()
         connectionGeneration++
@@ -609,9 +640,19 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private fun maybeAutoplayNext() {
-        if (!finished || !store.autoplayNext || loadingNext) return
+        if (!finished || !store.autoplayNext || loadingNext || pipMode || autoplayDismissed ||
+            !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
         if (next != null) {
-            playNext()
+            if (autoplayJob?.isActive == true) return
+            autoplaySeconds = 10
+            autoplayJob = lifecycleScope.launch {
+                while (autoplaySeconds > 0) {
+                    delay(1000)
+                    autoplaySeconds--
+                }
+                autoplayJob = null
+                if (finished && store.autoplayNext && !pipMode) playNext()
+            }
         } else if (nextLookupFailed && !retriedNextLookup) {
             retriedNextLookup = true
             val episodeKey = playback.key
@@ -627,6 +668,7 @@ class PlayerActivity : ComponentActivity() {
     }
     private fun playEpisode(target: Pair<Int, Int>, fromPicker: Boolean = false) {
         if (loadingNext) return
+        cancelAutoplay()
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
@@ -640,6 +682,7 @@ class PlayerActivity : ComponentActivity() {
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
                 resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
+                autoplayDismissed = false
                 retriedNextLookup = false
                 episodePicker = false
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) startPlayer()

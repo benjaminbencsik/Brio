@@ -102,7 +102,16 @@ class BrioStore(context: Context) {
     fun history(): List<History> = runCatching {
         gson.fromJson<List<History>>(secret("history").ifEmpty { "[]" }, object : TypeToken<List<History>>() {}.type)
     }.getOrDefault(emptyList())
+    private fun hiddenProgressKey() = storageName("hidden_continue")
+    fun hiddenContinueKeys(): Set<String> = prefs.getStringSet(hiddenProgressKey(), emptySet()).orEmpty()
+    fun hideFromContinue(key: String) {
+        prefs.edit().putStringSet(hiddenProgressKey(), hiddenContinueKeys() + key).apply()
+    }
     fun saveProgress(playback: Playback, position: Long, duration: Long) {
+        val hidden = hiddenContinueKeys()
+        if (playback.key in hidden && position > 0) {
+            prefs.edit().putStringSet(hiddenProgressKey(), hidden - playback.key).apply()
+        }
         val history = history().filterNot { it.playback.key == playback.key }.toMutableList()
         history.add(0, History(playback, position.coerceAtLeast(0), duration.coerceAtLeast(0), System.currentTimeMillis()))
         putSecret("history", gson.toJson(history.take(50)))
@@ -117,7 +126,7 @@ class BrioStore(context: Context) {
         cloudRecords().filter { it.category == "progress" && !it.deleted }.forEach {
             recordCloud(it.copy(updatedAt = now, deleted = true))
         }
-        prefs.edit().remove(storageName("history")).apply()
+        prefs.edit().remove(storageName("history")).remove(hiddenProgressKey()).apply()
     }
     fun libraryAccount(): String? = prefs.getString("library_account", null)
     /** Bring a library from an older account-backed build into the device library. */

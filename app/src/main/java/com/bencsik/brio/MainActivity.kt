@@ -255,7 +255,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                             }
                             tab == "Settings" -> Box(Modifier.padding(horizontal = 16.dp)) { SettingsScreen(vm, state, installUpdate) }
                             tab == "Debrid" -> Box(Modifier.padding(horizontal = 16.dp)) { DebridScreen(vm, state, play) }
-                            tab == "Continue" -> Box(Modifier.padding(horizontal = 16.dp)) { HistoryScreen(state, play, { vm.store.clearHistory(); vm.refreshLibrary() }) }
+                            tab == "Continue" -> Box(Modifier.padding(horizontal = 16.dp)) { HistoryScreen(state, play) { key -> vm.store.hideFromContinue(key); vm.refreshLibrary() } }
                             tab == "My List" -> CatalogGrid(state.watchlist, wide, false, false, "Your list is empty", "Save a movie or show to see it here.", vm::select, {})
                             else -> Column(Modifier.padding(horizontal = 16.dp)) {
                                 if (tab == "Search") {
@@ -326,7 +326,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
 
 @Composable private fun HomeScreen(state: UiState, wide: Boolean, compact: Boolean, showContinue: Boolean, info: (Title) -> Unit,
     watch: (Title) -> Unit, resume: (Playback) -> Unit, onContinue: () -> Unit, all: (String, String, String?) -> Unit) {
-    val inProgress = state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
+    val inProgress = state.history.filter { it.playback.key !in state.hiddenContinue && it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
     val visibleProgress = showContinue && inProgress.isNotEmpty()
     if ((state.loading || state.homeLoading) && state.titles.isEmpty() && state.homeRows.isEmpty() &&
         !visibleProgress && state.watchlist.isEmpty()) { Busy(); return }
@@ -641,11 +641,10 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
         item { TextButton(onClick = link, modifier = Modifier.focusRing()) { Text("Have a link? Open it directly →") } }
     }
 }
-@Composable private fun HistoryScreen(state: UiState, play: (Playback) -> Unit, clear: () -> Unit) {
-    val inProgress = state.history.filter { it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
+@Composable private fun HistoryScreen(state: UiState, play: (Playback) -> Unit, remove: (String) -> Unit) {
+    val inProgress = state.history.filter { it.playback.key !in state.hiddenContinue && it.positionMs > 0 && (it.durationMs <= 0 || it.positionMs < it.durationMs * 0.95) }
     if (inProgress.isEmpty()) { EmptyState("Nothing to continue yet", "Start watching a video, then return here to resume it."); return }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item { TextButton(onClick = clear, modifier = Modifier.focusRing()) { Text("Clear watch history") } }
         items(inProgress, key = { it.playback.key }) { history ->
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Slate)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -654,6 +653,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                         Button(onClick = { play(history.playback.copy(startOver = false)) }, modifier = Modifier.focusRing()) { Text("Resume") }
                         OutlinedButton(onClick = { play(history.playback.copy(startOver = true)) }, modifier = Modifier.focusRing()) { Text("Start over") }
                     }
+                    TextButton(onClick = { remove(history.playback.key) }, modifier = Modifier.focusRing()) { Text("Remove from Continue Watching") }
                     Text("${history.positionMs / 60000} min watched", color = Muted)
                     if (history.durationMs > 0) LinearProgressIndicator(progress = { (history.positionMs.toFloat() / history.durationMs).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 }
@@ -832,7 +832,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.14 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.15 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {
