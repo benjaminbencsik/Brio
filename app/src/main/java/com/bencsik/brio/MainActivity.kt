@@ -1,7 +1,9 @@
 package com.bencsik.brio
 
 import android.app.UiModeManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -70,6 +73,14 @@ private val Muted = Color(0xFF9DA7B5)
 private val Gold = Color(0xFFFFC44D)
 private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
+internal fun Context.isTelevisionDevice(): Boolean {
+    val mode = (getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType
+    val configuredMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+    return mode == Configuration.UI_MODE_TYPE_TELEVISION ||
+        configuredMode == Configuration.UI_MODE_TYPE_TELEVISION ||
+        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+        packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+}
 
 class MainActivity : ComponentActivity() {
     private val vm: BrioViewModel by viewModels()
@@ -87,7 +98,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         readSharedLink(intent)
-        val television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        val television = isTelevisionDevice()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Lime, onPrimary = Night, background = Night, surface = Slate, onSurface = Color.White, secondary = Lime)) {
                 TvScrollFocus(television) {
@@ -507,7 +518,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
 @Composable private fun Poster(item: Title, rank: Int? = null, click: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val tv = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+    val tv = LocalContext.current.isTelevisionDevice()
     val scale by animateFloatAsState(if (focused && !tv) 1.035f else 1f, label = "posterFocus")
     Column((if (tv) Modifier else Modifier.scale(scale)).clip(RoundedCornerShape(12.dp))
         .border(2.dp, if (focused) Lime else Color.Transparent, RoundedCornerShape(12.dp))
@@ -812,7 +823,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.12 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.13 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

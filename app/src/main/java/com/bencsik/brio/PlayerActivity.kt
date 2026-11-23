@@ -1,7 +1,6 @@
 package com.bencsik.brio
 
 import android.app.PictureInPictureParams
-import android.app.UiModeManager
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Rect
@@ -107,7 +106,7 @@ class PlayerActivity : ComponentActivity() {
         val parsed = runCatching { Gson().fromJson(intent.getStringExtra("playback"), Playback::class.java) }.getOrNull()
         if (parsed == null) { finish(); return }
         playback = savedInstanceState?.getString("playback")?.let { Gson().fromJson(it, Playback::class.java) } ?: parsed
-        television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        television = isTelevisionDevice()
         pipSupported = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
