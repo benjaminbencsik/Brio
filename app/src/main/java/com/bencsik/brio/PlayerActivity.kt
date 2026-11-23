@@ -149,6 +149,7 @@ class PlayerActivity : ComponentActivity() {
                                 else { showActions = false; controlsTimer?.cancel() }
                             })
                             isFocusable = true
+                            setOnKeyListener { _, _, event -> handleTvVideoKey(event) }
                             playerView = this
                             requestFocus()
                         }
@@ -587,7 +588,7 @@ class PlayerActivity : ComponentActivity() {
             finally { loadingNext = false; nextLoading = false }
         }
     }
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    private fun handleTvVideoKey(event: KeyEvent): Boolean {
         val onVideo = playerView?.hasFocus() == true || !showActions
         if (television && onVideo && !pipMode && !connecting && !serverPicker &&
             !episodePicker && !addServer && error == null) {
@@ -617,9 +618,10 @@ class PlayerActivity : ComponentActivity() {
                 return true
             }
         }
-        return super.dispatchKeyEvent(event)
+        return false
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (handleTvVideoKey(event)) return true
         when (keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { togglePlayback(); return true }
             KeyEvent.KEYCODE_MEDIA_PLAY -> { exo?.play(); return true }
@@ -628,6 +630,10 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_MEDIA_REWIND -> { seekRelative(-30_000); return true }
         }
         return super.onKeyDown(keyCode, event)
+    }
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (handleTvVideoKey(event)) return true
+        return super.onKeyUp(keyCode, event)
     }
 }
 
