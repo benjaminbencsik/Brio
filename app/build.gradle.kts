@@ -11,8 +11,8 @@ android {
         applicationId = "com.bencsik.brio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.5.11"
+        versionCode = 24
+        versionName = "0.5.12"
     }
     signingConfigs {
         getByName("debug") {

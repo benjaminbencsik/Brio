@@ -541,12 +541,40 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     val details = state.selected ?: return
     val item = details.title
     var confirmRestart by remember(item.key) { mutableStateOf(false) }
+    var showEpisodes by remember(item.key) { mutableStateOf(false) }
     if (confirmRestart) AlertDialog(
         onDismissRequest = { confirmRestart = false },
         title = { Text("Restart ${item.name}?") },
         text = { Text("Clear this show’s saved progress and play Season 1, Episode 1. Your watchlist is kept.") },
         confirmButton = { TextButton(onClick = { confirmRestart = false; vm.restartSeries(play) }, modifier = Modifier.focusRing()) { Text("Restart series") } },
         dismissButton = { TextButton(onClick = { confirmRestart = false }, modifier = Modifier.focusRing()) { Text("Cancel") } }
+    )
+    if (showEpisodes) AlertDialog(
+        onDismissRequest = { showEpisodes = false },
+        title = { Text("Seasons & episodes") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(details.seasons, key = { it.number }) { season ->
+                        NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) }
+                    }
+                }
+                if (details.seasons.isEmpty()) Text("Loading seasons…", color = Muted)
+                LazyColumn(Modifier.heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(state.episodes, key = { it.number }) { episode ->
+                        OutlinedButton(onClick = {
+                            vm.chooseEpisode(episode.number)
+                            showEpisodes = false
+                            vm.findSources(play)
+                        }, enabled = !state.resolving, modifier = Modifier.fillMaxWidth().focusRing()) {
+                            Text("▶  E${episode.number} · ${episode.name}", modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+                if (details.seasons.isNotEmpty() && state.episodes.isEmpty()) Text("Loading episodes…", color = Muted)
+            }
+        },
+        confirmButton = { TextButton(onClick = { showEpisodes = false }, modifier = Modifier.focusRing()) { Text("Close") } }
     )
     LazyColumn(verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 16.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
@@ -579,6 +607,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
             else if (item.kind == "tv" && state.episode == null) Text("Choose an episode to play.", color = Muted)
         }
         if (item.kind == "tv") {
+            item { OutlinedButton(onClick = { showEpisodes = true }, modifier = Modifier.fillMaxWidth().focusRing()) { Text("Browse seasons & episodes") } }
             item { OutlinedButton(onClick = { confirmRestart = true }, enabled = !state.resolving, modifier = Modifier.focusRing()) { Text("↺ Restart series") } }
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
             items(state.episodes) { episode ->
@@ -783,7 +812,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.11 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.12 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

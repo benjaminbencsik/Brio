@@ -14,9 +14,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -60,10 +60,10 @@ class PlayerActivity : ComponentActivity() {
     private var playerView: PlayerView? = null
     private var pipMode by mutableStateOf(false)
     private var pipSupported = false
+    private var television = false
     private var position by mutableLongStateOf(0)
     private var duration by mutableLongStateOf(0)
     private var showActions by mutableStateOf(true)
-    private var selectingPlayback = false
     private var controlsTimer: Job? = null
     private var error by mutableStateOf<String?>(null)
     private var next by mutableStateOf<Pair<Int, Int>?>(null)
@@ -74,6 +74,17 @@ class PlayerActivity : ComponentActivity() {
     private var introSkipped by mutableStateOf(false)
     private val introFocusRequester = FocusRequester()
     private var focusIntroAction by mutableStateOf(false)
+    private val playerActionFocusRequester = FocusRequester()
+    private var focusPlayerAction by mutableStateOf(false)
+    private var episodePicker by mutableStateOf(false)
+    private var episodeSeasons by mutableStateOf<List<Season>>(emptyList())
+    private var selectedEpisodeSeason by mutableIntStateOf(1)
+    private var seasonEpisodes by mutableStateOf<List<Episode>>(emptyList())
+    private var episodeCatalogLoading by mutableStateOf(false)
+    private var episodeCatalogError by mutableStateOf<String?>(null)
+    private var episodeCatalogGeneration = 0
+    private var episodeInfoJob: Job? = null
+    private var episodeSeasonsJob: Job? = null
     private var resumePosition = 0L
     private var resumePlay = true
     private var loadingNext = false
@@ -96,17 +107,18 @@ class PlayerActivity : ComponentActivity() {
         val parsed = runCatching { Gson().fromJson(intent.getStringExtra("playback"), Playback::class.java) }.getOrNull()
         if (parsed == null) { finish(); return }
         playback = savedInstanceState?.getString("playback")?.let { Gson().fromJson(it, Playback::class.java) } ?: parsed
-        val television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        television = (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
         pipSupported = packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
                 addServer -> addServer = false
                 serverPicker -> serverPicker = false
+                episodePicker -> closeEpisodePicker()
                 error != null -> error = null
                 !connecting && !showActions -> {
                     revealControls()
-                    playerView?.showController()
+                    if (!television) playerView?.showController()
                 }
                 else -> finish()
             }
@@ -128,21 +140,22 @@ class PlayerActivity : ComponentActivity() {
                         PlayerView(context).apply {
                             this.player = player
                             keepScreenOn = true
-                            useController = !pipMode
+                            useController = !pipMode && !television
                             controllerShowTimeoutMs = 4000
                             setShowSubtitleButton(true)
                             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                            if (!television) setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
                                 if (visibility == android.view.View.VISIBLE && !pipMode) revealControls()
                                 else { showActions = false; controlsTimer?.cancel() }
                             })
+                            isFocusable = true
                             playerView = this
                             requestFocus()
                         }
                     }, update = {
                         it.player = player
-                        it.useController = !pipMode
-                    }, modifier = Modifier.fillMaxSize().focusable().onKeyEvent { handlePlayerKey(it.nativeKeyEvent) })
+                        it.useController = !pipMode && !television
+                    }, modifier = Modifier.fillMaxSize())
                     if (showActions && !pipMode) TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(20.dp).focusRing()) { Text("← ${playback.label}", color = Color.White) }
                     val stream = playback.stream
                     val actions = skipActions(stream, position, duration,
@@ -166,6 +179,12 @@ class PlayerActivity : ComponentActivity() {
                         if (focusIntroAction && intro && showActions && !connecting) {
                             introFocusRequester.requestFocus()
                             focusIntroAction = false
+                        }
+                    }
+                    LaunchedEffect(focusPlayerAction, showActions, connecting) {
+                        if (focusPlayerAction && television && showActions && !connecting && !pipMode) {
+                            playerActionFocusRequester.requestFocus()
+                            focusPlayerAction = false
                         }
                     }
                     if (!pipMode && !connecting && showActions && (intro || credits || (next != null && (nearEnd || finished)) ||
@@ -200,9 +219,26 @@ class PlayerActivity : ComponentActivity() {
                         Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(20.dp),
                             horizontalAlignment = Alignment.End) {
                             TextButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Servers · ${servers.size}") }
+                            if (playback.season != null && playback.episode != null)
+                                TextButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Seasons & episodes") }
                             if (pipSupported && exo?.playbackState == Player.STATE_READY)
                                 OutlinedButton(onClick = ::minimize, modifier = Modifier.focusRing()) { Text("▣ Minimize") }
                         }
+                    }
+                    if (television && showActions && !pipMode && !connecting) Row(
+                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { finish() }, modifier = Modifier.focusRing()) { Text("← Back") }
+                        OutlinedButton(onClick = { seekRelative(-30_000); revealControls() },
+                            modifier = Modifier.focusRequester(playerActionFocusRequester).focusRing()) { Text("−30s") }
+                        Button(onClick = ::togglePlayback, modifier = Modifier.focusRing()) {
+                            Text(if (player?.isPlaying == true) "Ⅱ Pause" else "▶ Play")
+                        }
+                        OutlinedButton(onClick = { seekRelative(30_000); revealControls() }, modifier = Modifier.focusRing()) { Text("+30s") }
+                        if (playback.season != null && playback.episode != null)
+                            OutlinedButton(onClick = ::openEpisodePicker, modifier = Modifier.focusRing()) { Text("Episodes") }
                     }
                     if (!pipMode && serverPicker) AlertDialog(onDismissRequest = { serverPicker = false }, title = { Text("Choose a server") },
                         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -236,6 +272,41 @@ class PlayerActivity : ComponentActivity() {
                                 }.onFailure { serverError = it.message ?: "Enter a direct HTTPS video link." }
                         }, enabled = newServerUrl.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save & play") } },
                         dismissButton = { TextButton(onClick = { addServer = false }, modifier = Modifier.focusRing()) { Text("Cancel") } })
+                    if (!pipMode && episodePicker) AlertDialog(
+                        onDismissRequest = { if (!nextLoading) closeEpisodePicker() },
+                        title = { Text("Seasons & episodes") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(episodeSeasons, key = { it.number }) { season ->
+                                        OutlinedButton(onClick = { loadSeasonEpisodes(season.number) },
+                                            enabled = !nextLoading,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp,
+                                                if (selectedEpisodeSeason == season.number) MaterialTheme.colorScheme.primary else Color.Gray),
+                                            modifier = Modifier.focusRing()) { Text(season.name) }
+                                    }
+                                }
+                                if (episodeCatalogLoading) CircularProgressIndicator()
+                                episodeCatalogError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                LazyColumn(Modifier.heightIn(max = 360.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(seasonEpisodes, key = { it.number }) { episode ->
+                                        OutlinedButton(
+                                            onClick = { playEpisode(selectedEpisodeSeason to episode.number, fromPicker = true) },
+                                            enabled = !nextLoading, modifier = Modifier.fillMaxWidth().focusRing()
+                                        ) {
+                                            Text("▶  E${episode.number} · ${episode.name}", modifier = Modifier.fillMaxWidth())
+                                        }
+                                    }
+                                }
+                                if (nextLoading) Text("Loading episode…")
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = ::closeEpisodePicker, enabled = !nextLoading,
+                                modifier = Modifier.focusRing()) { Text("Close") }
+                        }
+                    )
                     if (!pipMode) error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
                             confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
@@ -266,6 +337,7 @@ class PlayerActivity : ComponentActivity() {
     }
     override fun onStop() {
         controlsTimer?.cancel()
+        episodeInfoJob?.cancel(); episodeSeasonsJob?.cancel()
         connectionGeneration++
         connectionJob?.cancel(); timeoutJob?.cancel()
         exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
@@ -286,7 +358,7 @@ class PlayerActivity : ComponentActivity() {
         exo?.let { resumePosition = it.currentPosition; save() }
         releasePlayer()
         serverIndex = index; attemptedServers.add(index)
-        connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false
+        connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
         connectionJob = lifecycleScope.launch {
             try {
                 val source = withTimeout(20000) { prepareStream(servers[index], store.debridToken) }
@@ -332,7 +404,11 @@ class PlayerActivity : ComponentActivity() {
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(playback.stream.headers)
             .setConnectTimeoutMs(15000).setReadTimeoutMs(20000)
         val data = DefaultDataSource.Factory(this, http)
-        val player = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(data)).build()
+        val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
+            .setSeekBackIncrementMs(30_000)
+            .setSeekForwardIncrementMs(30_000)
+            .build()
         exo = player
         mediaSession = MediaSession.Builder(this, player).build()
         player.apply {
@@ -392,7 +468,7 @@ class PlayerActivity : ComponentActivity() {
         controlsTimer?.cancel()
         controlsTimer = lifecycleScope.launch {
             delay(5000)
-            if (exo?.isPlaying == true && !serverPicker && error == null) {
+            if (exo?.isPlaying == true && !serverPicker && !episodePicker && !addServer && error == null) {
                 showActions = false
                 playerView?.hideController()
                 playerView?.requestFocus()
@@ -400,6 +476,51 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private fun seek(target: Long) { exo?.seekTo(target.coerceAtLeast(0).let { if (duration > 0) it.coerceAtMost(duration) else it }) }
+    private fun seekRelative(deltaMs: Long) { seek((exo?.currentPosition ?: position) + deltaMs) }
+    private fun togglePlayback() {
+        exo?.let { if (it.isPlaying) it.pause() else it.play() }
+        revealControls()
+        if (!television) playerView?.showController()
+    }
+    private fun openEpisodePicker() {
+        val season = playback.season ?: return
+        episodePicker = true
+        episodeSeasons = listOf(Season(season, if (season == 0) "Specials" else "Season $season"))
+        loadSeasonEpisodes(season)
+        episodeSeasonsJob?.cancel()
+        val key = playback.key
+        val title = playback.title
+        episodeSeasonsJob = lifecycleScope.launch {
+            try {
+                val available = BrioCatalog(store.tmdbToken).details(title).seasons
+                if (episodePicker && playback.key == key && available.isNotEmpty()) {
+                    episodeSeasons = (available + episodeSeasons).distinctBy { it.number }.sortedBy { it.number }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* The current season remains selectable. */ }
+        }
+    }
+    private fun closeEpisodePicker() {
+        episodePicker = false
+        revealControls()
+    }
+    private fun loadSeasonEpisodes(season: Int) {
+        episodeInfoJob?.cancel()
+        val generation = ++episodeCatalogGeneration
+        selectedEpisodeSeason = season
+        seasonEpisodes = emptyList()
+        episodeCatalogLoading = true
+        episodeCatalogError = null
+        val title = playback.title
+        episodeInfoJob = lifecycleScope.launch {
+            try {
+                seasonEpisodes = BrioCatalog(store.tmdbToken).episodes(title, season)
+                if (seasonEpisodes.isEmpty()) episodeCatalogError = "No episodes are listed for this season."
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { episodeCatalogError = e.message ?: "Could not load episodes. Try this season again." }
+            finally { if (generation == episodeCatalogGeneration) episodeCatalogLoading = false }
+        }
+    }
     private fun loadNextInfo() {
         nextInfoJob?.cancel()
         next = null
@@ -436,70 +557,77 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private fun playNext() {
-        if (loadingNext) return
         val target = next ?: return
+        playEpisode(target)
+    }
+    private fun playEpisode(target: Pair<Int, Int>, fromPicker: Boolean = false) {
+        if (loadingNext) return
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
                 val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
-                check(streams.isNotEmpty()) { "No streams are available for the next episode. Return to the catalog to choose another source." }
+                check(streams.isNotEmpty()) {
+                    if (fromPicker) "No video source was found for Season ${target.first}, Episode ${target.second}. Choose another episode or source."
+                    else "No streams are available for the next episode. Return to the catalog to choose another source."
+                }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
                 save(); releasePlayer()
                 servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
-                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false
+                resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
                 retriedNextLookup = false
+                episodePicker = false
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) startPlayer()
                 loadNextInfo()
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Couldn't load the next episode." }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (fromPicker) episodeCatalogError = e.message ?: "Couldn't load this episode."
+                else error = e.message ?: "Couldn't load the next episode."
+            }
             finally { loadingNext = false; nextLoading = false }
         }
     }
-    private fun handlePlayerKey(event: KeyEvent): Boolean {
-        val keyCode = event.keyCode
-        if (keyCode == KeyEvent.KEYCODE_DPAD_UP && playerView?.hasFocus() == true && !connecting &&
-            !serverPicker && error == null && playback.season != null && playback.episode != null &&
-            skipActions(playback.stream, position, duration, isEpisode = true, introDismissed = introSkipped).introTargetMs != null) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                revealControls()
-                focusIntroAction = true
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val onVideo = playerView?.hasFocus() == true || !showActions
+        if (television && onVideo && !pipMode && !connecting && !serverPicker &&
+            !episodePicker && !addServer && error == null) {
+            val key = event.keyCode
+            if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                if (event.action == KeyEvent.ACTION_UP) onBackPressedDispatcher.onBackPressed()
+                return true
             }
-            return true
+            if (key in listOf(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    when (key) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { seekRelative(-30_000); revealControls() }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { seekRelative(30_000); revealControls() }
+                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            revealControls()
+                            val intro = skipActions(playback.stream, position, duration,
+                                isEpisode = playback.season != null && playback.episode != null,
+                                introDismissed = introSkipped).introTargetMs != null
+                            if (key == KeyEvent.KEYCODE_DPAD_UP && intro) focusIntroAction = true
+                            else focusPlayerAction = true
+                        }
+                        else -> togglePlayback()
+                    }
+                }
+                return true
+            }
         }
-        val select = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-        if (select && (selectingPlayback || (!showActions && !connecting && !serverPicker && error == null))) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                selectingPlayback = true
-                exo?.let { if (it.isPlaying) it.pause() else it.play() }
-                revealControls()
-                playerView?.showController()
-            } else if (event.action == KeyEvent.ACTION_UP) selectingPlayback = false
-            return true
-        }
-        if (!connecting && !serverPicker && error == null && playerView?.hasFocus() == true &&
-            keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER)) {
-            if (event.action == KeyEvent.ACTION_DOWN) revealControls()
-            if (playerView?.dispatchKeyEvent(event) == true) return true
-        }
-        return false
+        return super.dispatchKeyEvent(event)
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (handlePlayerKey(event)) return true
-        if (keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER)) revealControls()
         when (keyCode) {
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { exo?.let { if (it.isPlaying) it.pause() else it.play() }; return true }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { togglePlayback(); return true }
             KeyEvent.KEYCODE_MEDIA_PLAY -> { exo?.play(); return true }
             KeyEvent.KEYCODE_MEDIA_PAUSE -> { exo?.pause(); return true }
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { seek(position + 10000); return true }
-            KeyEvent.KEYCODE_MEDIA_REWIND -> { seek(position - 10000); return true }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { seekRelative(30_000); return true }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> { seekRelative(-30_000); return true }
         }
         return super.onKeyDown(keyCode, event)
-    }
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (handlePlayerKey(event)) return true
-        return super.onKeyUp(keyCode, event)
     }
 }
 
