@@ -41,6 +41,8 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -114,7 +116,18 @@ class PlayerActivity : ComponentActivity() {
     private var newServerUrl by mutableStateOf("")
     private var serverError by mutableStateOf<String?>(null)
     private val attemptedServers = mutableSetOf<Int>()
-    private var servers: List<Stream> = emptyList()
+    private var servers by mutableStateOf<List<Stream>>(emptyList())
+    private var refreshingSources by mutableStateOf(false)
+    private var refreshedSources = false
+    private var reachedReady = false
+    private val trustedMediaHttp by lazy {
+        OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
+    }
+    private fun retrySelectedServer(index: Int) {
+        refreshedSources = false
+        attemptedServers.clear()
+        tryServer(index)
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = BrioStore(this)
@@ -227,7 +240,11 @@ class PlayerActivity : ComponentActivity() {
                             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 CircularProgressIndicator()
-                                Text(if (countdown > 0) "Trying another server…" else "Connecting to server ${serverIndex + 1}…", color = Color.White)
+                                Text(when {
+                                    refreshingSources -> "Looking for fresh links…"
+                                    countdown > 0 -> "Trying another server…"
+                                    else -> "Connecting to server ${serverIndex + 1}…"
+                                }, color = Color.White)
                                 Text(failedSource?.let { "$it failed. Trying to resume from your last position." }
                                     ?: "Looking for a working server. You can also choose one below.", color = Color.LightGray)
                                 OutlinedButton(onClick = { serverPicker = true }, modifier = Modifier.focusRing()) { Text("Try different server") }
@@ -342,7 +359,7 @@ class PlayerActivity : ComponentActivity() {
                             if (servers.size == 1) Text("Only one source returned a video for this title. Add a direct link here or add provider endpoints in Settings → Sources.")
                             LazyColumn(Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 itemsIndexed(servers) { index, source ->
-                                    TextButton(onClick = { serverPicker = false; attemptedServers.clear(); tryServer(index) }, modifier = Modifier.focusRing()) {
+                                    TextButton(onClick = { serverPicker = false; retrySelectedServer(index) }, modifier = Modifier.focusRing()) {
                                         Text("${index + 1}. ${source.name} · ${source.quality}")
                                     }
                                 }
@@ -364,8 +381,8 @@ class PlayerActivity : ComponentActivity() {
                             runCatching { store.addPersonalStream(playback.key, newServerUrl) }
                                 .onSuccess { source ->
                                     servers = (servers + source).distinctBy { it.url to it.headers }
-                                    addServer = false; attemptedServers.clear()
-                                    tryServer(servers.indexOfLast { it.url == source.url && it.headers == source.headers })
+                                    addServer = false
+                                    retrySelectedServer(servers.indexOfLast { it.url == source.url && it.headers == source.headers })
                                 }.onFailure { serverError = it.message ?: "Enter a direct HTTPS video link." }
                         }, enabled = newServerUrl.isNotBlank(), modifier = Modifier.focusRing()) { Text("Save & play") } },
                         dismissButton = { TextButton(onClick = { addServer = false }, modifier = Modifier.focusRing()) { Text("Cancel") } })
@@ -406,7 +423,7 @@ class PlayerActivity : ComponentActivity() {
                     )
                     if (!pipMode) error?.let { message ->
                         AlertDialog(onDismissRequest = { error = null }, title = { Text("Playback needs attention") }, text = { Text(message) },
-                            confirmButton = { Button(onClick = { error = null; attemptedServers.clear(); tryServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
+                            confirmButton = { Button(onClick = { error = null; retrySelectedServer(serverIndex) }, modifier = Modifier.focusRing()) { Text("Retry") } },
                             dismissButton = { TextButton(onClick = { error = null; serverPicker = true }, modifier = Modifier.focusRing()) { Text("Choose server") } })
                     }
                 }
@@ -445,7 +462,13 @@ class PlayerActivity : ComponentActivity() {
         episodeInfoJob?.cancel(); episodeSeasonsJob?.cancel()
         connectionGeneration++
         connectionJob?.cancel(); timeoutJob?.cancel()
-        exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
+        exo?.let {
+            if (reachedReady) {
+                resumePosition = it.currentPosition
+                save()
+            }
+            resumePlay = it.playWhenReady
+        }
         releasePlayer()
         super.onStop()
     }
@@ -460,9 +483,17 @@ class PlayerActivity : ComponentActivity() {
     private fun tryServer(index: Int) {
         connectionJob?.cancel(); timeoutJob?.cancel()
         val generation = ++connectionGeneration
-        exo?.let { resumePosition = it.currentPosition; resumePlay = it.playWhenReady; save() }
+        exo?.let {
+            if (reachedReady) {
+                resumePosition = it.currentPosition
+                save()
+            }
+            resumePlay = it.playWhenReady
+        }
         releasePlayer()
         serverIndex = index; attemptedServers.add(index)
+        refreshingSources = false
+        reachedReady = false
         connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
         connectionJob = lifecycleScope.launch {
             try {
@@ -491,14 +522,40 @@ class PlayerActivity : ComponentActivity() {
         val failedGeneration = ++connectionGeneration
         failedSource = servers.getOrNull(serverIndex)?.name
         exo?.let {
-            if (it.currentPosition > 0) resumePosition = it.currentPosition
+            if (reachedReady) {
+                resumePosition = it.currentPosition
+                if (it.duration > 0) save()
+            }
             resumePlay = it.playWhenReady
         }
         releasePlayer()
         val nextServer = nextUntriedServer(servers.size, serverIndex, attemptedServers)
         if (nextServer == null) {
-            connecting = false; countdown = 0
-            error = "${failedSource ?: "The source"} couldn’t play this video. Retry or choose a server to resume at your last position."
+            val title = playback.title
+            if (!refreshedSources && title.id > 0 && title.kind in listOf("movie", "tv")) {
+                refreshedSources = true
+                refreshingSources = true
+                connecting = true
+                countdown = 0
+                connectionJob = lifecycleScope.launch {
+                    val fresh = try {
+                        withTimeout(30_000) {
+                            store.resolveSources(StreamRequest(title.id, title.kind, playback.season, playback.episode, title.imdbId), title.name)
+                        }
+                    } catch (_: kotlinx.coroutines.TimeoutCancellationException) { emptyList() }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { emptyList() }
+                    if (failedGeneration != connectionGeneration) return@launch
+                    refreshingSources = false
+                    if (fresh.isEmpty()) {
+                        showSourceFailure()
+                    } else {
+                        servers = fresh
+                        attemptedServers.clear()
+                        tryServer(0)
+                    }
+                }
+            } else showSourceFailure()
             return
         }
         connecting = true
@@ -510,9 +567,20 @@ class PlayerActivity : ComponentActivity() {
             if (failedGeneration == connectionGeneration) tryServer(nextServer)
         }
     }
+    private fun showSourceFailure() {
+        connecting = false
+        refreshingSources = false
+        countdown = 0
+        error = "${failedSource ?: "The source"} couldn’t play this video. Retry or choose a server to resume at your last position."
+    }
     private fun attachPlayer(generation: Int) {
-        val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(playback.stream.headers)
-            .setConnectTimeoutMs(15000).setReadTimeoutMs(20000)
+        val stream = playback.stream
+        val http = if (stream.jellyfin) {
+            OkHttpDataSource.Factory(trustedMediaHttp).setDefaultRequestProperties(store.jellyfinHeaders(stream.url))
+        } else {
+            DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
+                .setConnectTimeoutMs(15000).setReadTimeoutMs(20000)
+        }
         val data = DefaultDataSource.Factory(this, http)
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(data))
@@ -540,7 +608,10 @@ class PlayerActivity : ComponentActivity() {
                         Player.STATE_BUFFERING -> armTimeout(generation)
                         Player.STATE_READY, Player.STATE_ENDED -> {
                             timeoutJob?.cancel(); connecting = false; countdown = 0; failedSource = null
-                            if (playbackState == Player.STATE_READY && !pipMode) revealControls()
+                            if (playbackState == Player.STATE_READY) {
+                                reachedReady = true
+                                if (!pipMode) revealControls()
+                            }
                             if (playbackState == Player.STATE_ENDED) {
                                 save()
                                 maybeAutoplayNext()
@@ -716,14 +787,14 @@ class PlayerActivity : ComponentActivity() {
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
-                val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
+                val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId), playback.title.name)
                 check(streams.isNotEmpty()) {
                     if (fromPicker) "No video source was found for Season ${target.first}, Episode ${target.second}. Choose another episode or source."
                     else "No streams are available for the next episode. Return to the catalog to choose another source."
                 }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
                 save(); releasePlayer()
-                servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear()
+                servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear(); refreshedSources = false
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
                 resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
                 autoplayDismissed = false

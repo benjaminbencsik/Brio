@@ -8,6 +8,8 @@ import com.bencsik.brio.core.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -73,13 +75,37 @@ class BrioStore(context: Context) {
         putSecret("personal_streams", gson.toJson((saved + (playbackKey to (links + source))).toList().takeLast(100).toMap()))
         return source
     }
-    suspend fun resolveSources(request: StreamRequest): List<Stream> {
+    val jellyfinAddress: String get() = secret("jellyfin_address")
+    val jellyfinKey: String get() = secret("jellyfin_key")
+    fun configureJellyfin(address: String, key: String) {
+        val url = address.trim()
+        val token = key.trim()
+        if (url.isNotEmpty() || token.isNotEmpty()) JellyfinSource(url, token)
+        putSecret("jellyfin_address", url)
+        putSecret("jellyfin_key", token)
+    }
+    fun jellyfinHeaders(url: String): Map<String, String> =
+        jellyfinSource()?.playbackHeaders(url).orEmpty()
+
+    private fun jellyfinSource(): JellyfinSource? {
+        val address = jellyfinAddress
+        val key = jellyfinKey
+        return if (address.isBlank() || key.isBlank()) null else JellyfinSource(address, key)
+    }
+    suspend fun resolveSources(request: StreamRequest, title: String = ""): List<Stream> = coroutineScope {
         val key = "${request.type}:${request.id}:${request.season ?: 0}:${request.episode ?: 0}"
         val personal = personalStreams(key)
-        val online = try { resolveConfiguredSources(provider, tmdbToken, request) }
+        val library = async {
+            try { if (title.isBlank()) emptyList() else jellyfinSource()?.resolve(request, title).orEmpty() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { if (personal.isEmpty()) throw e else emptyList() }
-        return (online + personal).distinctBy { it.url to it.headers }
+            catch (_: Exception) { emptyList() }
+        }
+        val online = try { Result.success(resolveConfiguredSources(provider, tmdbToken, request)) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { Result.failure(e) }
+        val owned = personal + library.await()
+        val matches = online.getOrElse { if (owned.isEmpty()) throw it else emptyList() }
+        (owned + matches).distinctBy { it.url to it.headers }
     }
     var showContinueOnHome: Boolean
         get() = prefs.getBoolean("show_continue_home", true)
