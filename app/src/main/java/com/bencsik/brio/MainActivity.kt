@@ -39,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -73,6 +74,8 @@ private val Night = Color(0xFF080D15)
 private val Slate = Color(0xFF1B222D)
 private val Muted = Color(0xFF9DA7B5)
 private val Gold = Color(0xFFFFC44D)
+private data class PosterFocus(val target: String?, val record: (String?) -> Unit)
+private val LocalPosterFocus = compositionLocalOf<PosterFocus?> { null }
 private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
 private const val LayoutPrefs = "brio_layout"
@@ -169,12 +172,14 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var query by rememberSaveable { mutableStateOf("") }
     var showLink by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val browseState = rememberSaveableStateHolder()
+    var focusedPoster by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.error) { state.error?.let { snackbar.showSnackbar(it); vm.dismissError() } }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it) } }
     LaunchedEffect(sharedLink) { if (sharedLink.isNotBlank()) showLink = true }
     fun navigate(next: String) {
-        vm.closeDetails(); tab = next
+        focusedPoster = null; vm.closeDetails(); tab = next
         when (next) {
             "Home" -> { kind = "movie"; vm.browse(kind); vm.loadHomeRows() }
             "Movies" -> { kind = "movie"; vm.loadCategories(kind) }
@@ -248,8 +253,11 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                         }
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when {
-                            state.selected != null -> Box(Modifier.padding(horizontal = 16.dp)) { DetailsScreen(state, vm, wide, compact, play) { showLink = true } }
+                        if (state.selected != null) Box(Modifier.padding(horizontal = 16.dp)) {
+                            DetailsScreen(state, vm, wide, compact, play) { showLink = true }
+                        } else browseState.SaveableStateProvider(tab) {
+                            CompositionLocalProvider(LocalPosterFocus provides PosterFocus(focusedPoster) { focusedPoster = it }) {
+                            when {
                             tab == "Home" -> HomeScreen(state, wide, compact, vm.store.showContinueOnHome, vm::select, { vm.watch(it, play) }, play, { navigate("Continue") }) { label, shelfKind, genre ->
                                 kind = shelfKind; categoryLabel = label; categoryGenre = genre; categoryParent = "Home"
                                 tab = "Category"; vm.browse(kind, genre = genre)
@@ -273,6 +281,8 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                                 CatalogGrid(state.titles, wide, state.loading, state.canLoadMore, "Nothing found",
                                     "Try another search or check Settings.", vm::select, { vm.browse(kind, if (tab == "Search") query else "", more = true,
                                         genre = if (tab == "Category") categoryGenre else null) })
+                            }
+                            }
                             }
                         }
                     }
@@ -530,9 +540,21 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     val focused by interaction.collectIsFocusedAsState()
     val tv = LocalContext.current.isTelevisionDevice()
     val scale by animateFloatAsState(if (focused && !tv) 1.035f else 1f, label = "posterFocus")
-    Column((if (tv) Modifier else Modifier.scale(scale)).clip(RoundedCornerShape(12.dp))
+    val restore = LocalPosterFocus.current
+    val requester = remember { FocusRequester() }
+    val posterKey = if (tv) rememberSaveable(item.key) { java.util.UUID.randomUUID().toString() } else null
+    LaunchedEffect(restore?.target, posterKey) {
+        if (posterKey != null && restore != null && restore.target == posterKey) {
+            requester.requestFocus()
+            restore.record(null)
+        }
+    }
+    Column((if (tv) Modifier.focusRequester(requester) else Modifier.scale(scale)).clip(RoundedCornerShape(12.dp))
         .border(2.dp, if (focused) Lime else Color.Transparent, RoundedCornerShape(12.dp))
-        .clickable(interactionSource = interaction, indication = null, onClick = click)) {
+        .clickable(interactionSource = interaction, indication = null, onClick = {
+            if (posterKey != null) restore?.record(posterKey)
+            click()
+        })) {
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(Color(0xFF34475B), Slate, Color(0xFF25342C))))) {
             if (item.poster != null) AsyncImage(item.poster, item.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.Center) {
@@ -561,6 +583,21 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
 @Composable private fun DetailsScreen(state: UiState, vm: BrioViewModel, wide: Boolean, compact: Boolean, play: (Playback) -> Unit, link: () -> Unit) {
     val details = state.selected ?: return
     val item = details.title
+    var upNext by remember(item.key) { mutableStateOf<Pair<Int, Int>?>(null) }
+    LaunchedEffect(details, state.watchedEpisodes) {
+        upNext = null
+        if (item.kind == "tv") {
+            try { upNext = vm.upNext(details, state.watchedEpisodes) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { /* Manual season selection stays available. */ }
+        }
+    }
+    val currentHistory = state.history.firstOrNull { entry ->
+        entry.playback.title.key == item.key && entry.playback.season == state.season &&
+            entry.playback.episode == state.episode && entry.positionMs > 0 &&
+            entry.playback.key !in state.watchedEpisodes &&
+            (entry.durationMs <= 0 || entry.positionMs < entry.durationMs * 0.9)
+    }
     var confirmRestart by remember(item.key) { mutableStateOf(false) }
     var showEpisodes by remember(item.key) { mutableStateOf(false) }
     if (confirmRestart) AlertDialog(
@@ -617,24 +654,37 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                     enabled = !state.resolving && (item.kind != "tv" || state.episode != null),
                     modifier = Modifier.weight(1f).focusRing(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {
-                    Text(if (state.resolving) "Loading…" else "▶ Play")
+                    Text(if (state.resolving) "Loading…" else if (currentHistory != null) "▶ Resume" else "▶ Play")
                 }
                 OutlinedButton(onClick = { vm.toggle(item) }, modifier = Modifier.weight(1f).focusRing()) {
                     Text(if (state.watchlist.any { it.key == item.key }) "✓ Saved" else "+ My List", maxLines = 1)
                 }
             }
+            if (currentHistory != null) TextButton(onClick = { vm.findSources(play, startOver = true) },
+                enabled = !state.resolving, modifier = Modifier.focusRing()) { Text("Start over") }
             if (state.streams.isNotEmpty()) TextButton(onClick = { vm.findSources() },
                 modifier = Modifier.focusRing()) { Text("Choose source · ${state.streams.size}") }
             else if (item.kind == "tv" && state.episode == null) Text("Choose an episode to play.", color = Muted)
         }
         if (item.kind == "tv") {
+            upNext?.let { target ->
+                item {
+                    Button(onClick = { vm.findSources(play, target = target) }, enabled = !state.resolving,
+                        modifier = Modifier.fillMaxWidth().focusRing()) { Text("▶ Up Next · S${target.first} E${target.second}") }
+                }
+            }
             item { OutlinedButton(onClick = { showEpisodes = true }, modifier = Modifier.fillMaxWidth().focusRing()) { Text("Browse seasons & episodes") } }
             item { OutlinedButton(onClick = { confirmRestart = true }, enabled = !state.resolving, modifier = Modifier.focusRing()) { Text("↺ Restart series") } }
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
-            items(state.episodes) { episode ->
-                OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth().focusRing(), border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
-                    val watched = "${item.key}:${state.season ?: 0}:${episode.number}" in state.watchedEpisodes
-                    Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
+            items(state.episodes, key = { it.number }) { episode ->
+                val watched = "${item.key}:${state.season ?: 0}:${episode.number}" in state.watchedEpisodes
+                Column {
+                    OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth().focusRing(),
+                        border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
+                        Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
+                    }
+                    TextButton(onClick = { state.season?.let { vm.setWatched(item, it, episode.number, !watched) } },
+                        modifier = Modifier.focusRing()) { Text(if (watched) "Mark unwatched" else "Mark watched") }
                 }
             }
         }
@@ -689,6 +739,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     val layoutMode = layoutPrefs.getString("mode", "Auto") ?: "Auto"
     var section by rememberSaveable { mutableStateOf("Experience") }
     var showContinue by remember { mutableStateOf(vm.store.showContinueOnHome) }
+    var autoplayDelay by remember { mutableIntStateOf(vm.store.autoplayDelay) }
     var autoplay by remember { mutableStateOf(vm.store.autoplayNext) }
     var autoIntro by remember { mutableStateOf(vm.store.autoSkipIntro) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -754,6 +805,14 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                     autoplay = it; vm.store.autoplayNext = it
                 }
                 HorizontalDivider(color = Color(0xFF303947))
+                Text("Autoplay countdown")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(5, 10, 20).forEach { seconds ->
+                        FilterChip(selected = autoplayDelay == seconds, onClick = {
+                            autoplayDelay = seconds; vm.store.autoplayDelay = seconds
+                        }, label = { Text("${seconds}s") }, modifier = Modifier.focusRing())
+                    }
+                }
                 SettingsSwitch("Auto-skip intros", "Skip automatically when a source supplies intro timing.", autoIntro) {
                     autoIntro = it; vm.store.autoSkipIntro = it
                 }
@@ -849,7 +908,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.16 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.17 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

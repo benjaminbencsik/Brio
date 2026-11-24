@@ -688,7 +688,7 @@ class PlayerActivity : ComponentActivity() {
             !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) return
         if (next != null) {
             if (autoplayJob?.isActive == true) return
-            autoplaySeconds = 10
+            autoplaySeconds = store.autoplayDelay
             autoplayJob = lifecycleScope.launch {
                 while (autoplaySeconds > 0) {
                     delay(1000)

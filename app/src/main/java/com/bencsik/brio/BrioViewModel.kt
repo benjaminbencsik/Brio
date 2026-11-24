@@ -54,7 +54,7 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
     fun reload() { refreshLibrary(); browse(lastKind, lastQuery, genre = lastGenre) }
     fun refreshLibrary() = update { it.copy(watchlist = store.watchlist(), history = store.history(), hiddenContinue = store.hiddenContinueKeys(),
         watchedEpisodes = (visibleCloudProgress(store.cloudRecords()).filter { r -> r.durationMs > 0 && r.positionMs >= r.durationMs * 0.9 }.map { r -> r.key } +
-            store.history().filter { h -> h.durationMs > 0 && h.positionMs >= h.durationMs * 0.9 }.map { h -> h.playback.key }).toSet()) }
+            store.history().filter { h -> h.durationMs > 0 && h.positionMs >= h.durationMs * 0.9 }.map { h -> h.playback.key }).toSet() + store.watchedOverrides(true) - store.watchedOverrides(false)) }
     fun browse(kind: String = "movie", query: String = "", more: Boolean = false, genre: String? = null) {
         catalogJob?.cancel()
         lastKind = kind; lastQuery = query; lastGenre = genre
@@ -166,8 +166,21 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun findSources(onReady: ((Playback) -> Unit)? = null) {
-        val snapshot = _state.value
+    fun setWatched(title: Title, season: Int, episode: Int, watched: Boolean) {
+        store.setEpisodeWatched("${title.key}:$season:$episode", watched)
+        refreshLibrary()
+    }
+    suspend fun upNext(details: Details, watched: Set<String>): Pair<Int, Int>? {
+        val api = BrioCatalog(store.tmdbToken)
+        for (season in details.seasons.filter { it.number > 0 }.sortedBy { it.number }) {
+            val episode = api.episodes(details.title, season.number).sortedBy { it.number }
+                .firstOrNull { "${details.title.key}:${season.number}:${it.number}" !in watched }
+            if (episode != null) return season.number to episode.number
+        }
+        return null
+    }
+    fun findSources(onReady: ((Playback) -> Unit)? = null, target: Pair<Int, Int>? = null, startOver: Boolean = false) {
+        val snapshot = _state.value.let { if (target == null) it else it.copy(season = target.first, episode = target.second) }
         val item = snapshot.selected?.title ?: return
         sourceJob?.cancel()
         sourceJob = viewModelScope.launch {
@@ -179,9 +192,9 @@ class BrioViewModel(application: Application) : AndroidViewModel(application) {
                     else -> store.resolveSources(StreamRequest(item.id, item.kind, snapshot.season, snapshot.episode, item.imdbId))
                 }
                 check(streams.isNotEmpty()) { "No sources were found. Try a direct link or another provider." }
-                update { it.copy(streams = streams, resolving = false) }
+                update { it.copy(streams = if (target == null) streams else emptyList(), resolving = false) }
                 if (onReady != null) {
-                    onReady(Playback(item, streams.first(), snapshot.season, snapshot.episode, streams))
+                    onReady(Playback(item, streams.first(), snapshot.season, snapshot.episode, streams, startOver = startOver))
                 }
             }
         }

@@ -108,6 +108,12 @@ class BrioStore(context: Context) {
         prefs.edit().putStringSet(hiddenProgressKey(), hiddenContinueKeys() + key).apply()
     }
     fun saveProgress(playback: Playback, position: Long, duration: Long) {
+        if (playback.episode != null && duration > 0 && position >= duration * 0.9) {
+            val unwatched = watchedOverrides(false)
+            if (playback.key in unwatched) {
+                prefs.edit().putStringSet("episode_watched_false", unwatched - playback.key).apply()
+            }
+        }
         val hidden = hiddenContinueKeys()
         if (playback.key in hidden && position > 0) {
             prefs.edit().putStringSet(hiddenProgressKey(), hidden - playback.key).apply()
@@ -117,7 +123,21 @@ class BrioStore(context: Context) {
         putSecret("history", gson.toJson(history.take(50)))
         if (playback.title.id > 0 && playback.title.kind in listOf("movie", "tv") && duration > 0) recordCloud(cloudProgress(history.first()))
     }
+    fun watchedOverrides(watched: Boolean): Set<String> =
+        prefs.getStringSet("episode_watched_$watched", emptySet()).orEmpty()
+    fun setEpisodeWatched(key: String, watched: Boolean) {
+        prefs.edit().putStringSet("episode_watched_$watched", watchedOverrides(watched) + key)
+            .putStringSet("episode_watched_${!watched}", watchedOverrides(!watched) - key).apply()
+    }
+    var autoplayDelay: Int
+        get() = prefs.getInt("autoplay_delay", 10).takeIf { it in listOf(5, 10, 20) } ?: 10
+        set(value) { prefs.edit().putInt("autoplay_delay", value).apply() }
     fun clearSeriesProgress(title: Title) {
+        prefs.edit().apply {
+            for (watched in listOf(true, false)) {
+                putStringSet("episode_watched_$watched", watchedOverrides(watched).filterNot { it.startsWith(title.key + ":") }.toSet())
+            }
+        }.apply()
         putSecret("history", gson.toJson(history().filterNot { it.playback.title.key == title.key }))
         recordCloud(CloudRecord(title.key, "reset", cloudTitle(title), System.currentTimeMillis()))
     }
@@ -126,7 +146,8 @@ class BrioStore(context: Context) {
         cloudRecords().filter { it.category == "progress" && !it.deleted }.forEach {
             recordCloud(it.copy(updatedAt = now, deleted = true))
         }
-        prefs.edit().remove(storageName("history")).remove(hiddenProgressKey()).apply()
+        prefs.edit().remove(storageName("history")).remove(hiddenProgressKey())
+            .remove("episode_watched_true").remove("episode_watched_false").apply()
     }
     fun libraryAccount(): String? = prefs.getString("library_account", null)
     /** Bring a library from an older account-backed build into the device library. */
