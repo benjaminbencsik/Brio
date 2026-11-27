@@ -9,6 +9,11 @@ import android.os.Bundle
 import android.util.Rational
 import android.view.KeyEvent
 import android.widget.Toast
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
+import android.webkit.WebResourceResponse
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
@@ -117,6 +122,9 @@ class PlayerActivity : ComponentActivity() {
     private var newServerUrl by mutableStateOf("")
     private var serverError by mutableStateOf<String?>(null)
     private val attemptedServers = mutableSetOf<Int>()
+    private var webFallback by mutableStateOf<String?>(null)
+    private var webFailure by mutableStateOf(false)
+    private var webView: WebView? = null
     private var servers by mutableStateOf<List<Stream>>(emptyList())
     private var refreshingSources by mutableStateOf(false)
     private var refreshedSources = false
@@ -142,6 +150,7 @@ class PlayerActivity : ComponentActivity() {
             (!television || Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         onBackPressedDispatcher.addCallback(this) {
             when {
+                webFallback != null -> finish()
                 autoplaySeconds > 0 -> cancelAutoplay()
                 trackPicker -> { trackPicker = false; revealControls() }
                 addServer -> addServer = false
@@ -168,6 +177,11 @@ class PlayerActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFFB8F36A), onPrimary = Color(0xFF0B101A))) {
                 val player = exo
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    val page = webFallback
+                    if (page != null) {
+                        ProviderPlayer(page)
+                        return@Box
+                    }
                     if (player != null) AndroidView(factory = { context ->
                         PlayerView(context).apply {
                             this.player = player
@@ -444,7 +458,64 @@ class PlayerActivity : ComponentActivity() {
         }
         loadNextInfo()
     }
-    override fun onStart() { super.onStart(); startPlayer() }
+    override fun onStart() {
+        super.onStart()
+        if (webFallback == null) startPlayer() else webView?.onResume()
+    }
+    override fun onPause() {
+        webView?.onPause()
+        super.onPause()
+    }
+    override fun onResume() {
+        super.onResume()
+        webView?.onResume()
+    }
+    @android.annotation.SuppressLint("SetJavaScriptEnabled")
+    @Composable private fun ProviderPlayer(page: String) {
+        Box(Modifier.fillMaxSize()) {
+            AndroidView(factory = { context ->
+                WebView(context).apply {
+                    webView = this
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    keepScreenOn = true
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.setSupportMultipleWindows(false)
+                    settings.javaScriptCanOpenWindowsAutomatically = false
+                    settings.mediaPlaybackRequiresUserGesture = true
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                            if (!request.isForMainFrame) return request.url.scheme != "https"
+                            return request.url.scheme != "https" ||
+                                request.url.host != "vixsrc.to" || request.url.path?.trimEnd('/') !=
+                                android.net.Uri.parse(page).path?.trimEnd('/')
+                        }
+                        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                            if (request.isForMainFrame) webFailure = true
+                        }
+                        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                            if (request.isForMainFrame) webFailure = true
+                        }
+                    }
+                    loadUrl(page)
+                    requestFocus()
+                }
+            }, onRelease = { view ->
+                if (webView === view) webView = null
+                view.stopLoading()
+                view.destroy()
+            }, modifier = Modifier.fillMaxSize())
+            TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().focusRing()) {
+                Text("← Back", color = Color.White)
+            }
+            if (webFailure) AlertDialog(onDismissRequest = { finish() },
+                title = { Text("Web player unavailable") },
+                text = { Text("The Vixsrc web player did not load on this device.") },
+                confirmButton = { TextButton(onClick = { finish() }) { Text("Back") } })
+        }
+    }
     override fun onPictureInPictureModeChanged(inPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(inPictureInPictureMode, newConfig)
         pipMode = inPictureInPictureMode
@@ -498,6 +569,12 @@ class PlayerActivity : ComponentActivity() {
         refreshingSources = false
         reachedReady = false
         connecting = true; countdown = 0; error = null; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
+        val webPage = providerPlayerUrl(playback.title.id, playback.title.kind, playback.season, playback.episode)
+        if (webPage != null && servers[index].url == webPage) {
+            webFailure = false
+            webFallback = webPage
+            return
+        }
         connectionJob = lifecycleScope.launch {
             try {
                 val source = withTimeout(20000) { prepareStream(servers[index], store.debridToken) }

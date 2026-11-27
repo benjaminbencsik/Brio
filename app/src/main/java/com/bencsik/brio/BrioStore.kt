@@ -15,6 +15,16 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Credentials and signed playback URLs never go into plaintext preferences or backups. */
+internal fun providerPlayerUrl(id: Int, kind: String, season: Int?, episode: Int?): String? {
+    if (id <= 0) return null
+    return when {
+        kind == "movie" -> "https://vixsrc.to/movie/$id/"
+        kind == "tv" && season != null && season >= 0 && episode != null && episode > 0 ->
+            "https://vixsrc.to/tv/$id/$season/$episode/"
+        else -> null
+    }
+}
+
 class BrioStore(context: Context) {
     private val prefs = context.getSharedPreferences("brio", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -86,10 +96,12 @@ class BrioStore(context: Context) {
     suspend fun resolveSources(request: StreamRequest): List<Stream> {
         val key = "${request.type}:${request.id}:${request.season ?: 0}:${request.episode ?: 0}"
         val personal = personalStreams(key)
+        val web = providerPlayerUrl(request.id, request.type, request.season, request.episode)
+            ?.let { Stream(it, "Vixsrc web player", "Web") }
         val online = try { resolveConfiguredSources(provider, tmdbToken, request) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { if (personal.isEmpty()) throw e else emptyList() }
-        return (personal + online).distinctBy { it.url to it.headers }
+            catch (e: Exception) { if (personal.isEmpty() && web == null) throw e else emptyList() }
+        return (personal + online + listOfNotNull(web)).distinctBy { it.url to it.headers }
     }
     var showContinueOnHome: Boolean
         get() = prefs.getBoolean("show_continue_home", true)
