@@ -733,6 +733,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     var tmdb by remember { mutableStateOf(vm.store.tmdbToken) }
     var provider by remember { mutableStateOf(vm.store.provider) }
     var newSource by rememberSaveable { mutableStateOf("") }
+    var sourceNotice by remember { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
     var jellyfinAddress by remember { mutableStateOf(vm.store.jellyfinAddress) }
@@ -893,28 +894,39 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
             }
             if (jellyfinStatus.isNotBlank()) Text(jellyfinStatus, color = Muted)
         } }
-        item { SettingsPanel("Your sources", "Add up to six HTTPS add-on manifests or Brio JSON endpoints.") {
+        item { SettingsPanel("Streaming add-ons", "Combine up to six Nuvio Streams or Stremio manifest URLs, or Brio JSON endpoints. First in the list plays first when it has a link.") {
             val entries = provider.lines().map(String::trim).filter(String::isNotBlank)
             if (entries.isEmpty()) Text("No extra sources added yet.", color = Muted)
             entries.forEachIndexed { index, endpoint ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(endpoint, modifier = Modifier.weight(1f), maxLines = 2,
+                    Text("${index + 1}. " + runCatching { Uri.parse(endpoint).host }.getOrNull().orEmpty(), modifier = Modifier.weight(1f), maxLines = 2,
                         overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { provider = entries.filterIndexed { i, _ -> i != index }.joinToString("\n") },
+                    TextButton(onClick = {
+                        val reordered = entries.toMutableList()
+                        reordered.add(0, reordered.removeAt(index))
+                        provider = reordered.joinToString("\n"); vm.store.provider = provider
+                    }, enabled = index > 0, modifier = Modifier.focusRing()) { Text("First") }
+                    TextButton(onClick = {
+                        provider = entries.filterIndexed { i, _ -> i != index }.joinToString("\n")
+                        vm.store.provider = provider
+                    },
                         modifier = Modifier.focusRing()) { Text("Remove") }
                 }
             }
             OutlinedTextField(newSource, { newSource = it; sourceError = null },
-                label = { Text("Add source URL") }, placeholder = { Text("https://example.org/manifest.json") },
-                modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true)
+                label = { Text("Add URLs · one per line") }, placeholder = { Text("https://example.org/manifest.json") },
+                modifier = Modifier.fillMaxWidth().focusRing(), maxLines = 5)
             sourceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             OutlinedButton(onClick = {
                 try {
-                    val added = normalizeProviderEndpoint(newSource)
-                    provider = normalizeProviderEndpoints((entries + added).joinToString("\n")).joinToString("\n")
+                    val added = normalizeProviderEndpoints(newSource)
+                    val updated = normalizeProviderEndpoints((entries + added).distinct().joinToString("\n"))
+                    sourceNotice = "Added ${updated.size - entries.size} source(s)."
+                    provider = updated.joinToString("\n"); vm.store.provider = provider
                     newSource = ""; sourceError = null
                 } catch (e: Exception) { sourceError = e.message ?: "Enter a valid HTTPS source URL." }
-            }, enabled = newSource.isNotBlank(), modifier = Modifier.focusRing()) { Text("Add source") }
+            }, enabled = newSource.isNotBlank(), modifier = Modifier.focusRing()) { Text("Add sources") }
+            if (sourceNotice.isNotBlank()) Text(sourceNotice, color = Muted)
             Text("Add-ons must return direct HTTPS video URLs. Sources and any keys in their URLs are saved on this device.",
                 color = Muted, style = MaterialTheme.typography.bodySmall)
         } }
@@ -931,7 +943,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.18 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.19 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

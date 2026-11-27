@@ -14,7 +14,7 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 fun normalizeProviderEndpoint(value: String): String =
-    requireHttps(value.trim().replaceFirst(Regex("^stremio://"), "https://"))
+    requireHttps(value.trim().replaceFirst(Regex("^stremio://", RegexOption.IGNORE_CASE), "https://"))
 
 /** One source URL per line. Existing single-source settings remain valid. */
 fun normalizeProviderEndpoints(value: String): List<String> {
@@ -39,13 +39,12 @@ internal suspend fun aggregateSources(providers: List<suspend () -> List<Stream>
 
 suspend fun resolveConfiguredSources(endpoint: String, tmdbToken: String, request: StreamRequest): List<Stream> {
     val endpoints = normalizeProviderEndpoints(endpoint)
-    val providers = listOf<suspend () -> List<Stream>>({ VixsrcStreamProvider().resolve(request) }) +
-        endpoints.map { normalized -> suspend {
+    val providers = endpoints.map { normalized -> suspend {
             if (normalized.toHttpUrlOrNull()!!.encodedPath.endsWith("/manifest.json")) {
                 val imdbId = request.imdbId ?: MediaRepository(tmdbToken).imdbId(request)
                 StremioStreamProvider(normalized, imdbId).resolve(request)
             } else JsonStreamProvider(normalized).resolve(request)
-        } }
+        } } + listOf<suspend () -> List<Stream>>({ VixsrcStreamProvider().resolve(request) })
     return aggregateSources(providers)
 }
 
@@ -59,9 +58,10 @@ class StremioStreamProvider(
     private fun get(url: String): JsonObject {
         client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             check(response.isSuccessful) { "Add-on request failed (HTTP ${response.code}). Try again or use another add-on." }
-            val body = response.body?.string() ?: error("The add-on returned an empty response.")
-            require(body.length <= 1_000_000) { "The add-on response is too large." }
-            return JsonParser.parseString(body).asJsonObject
+            val body = response.body?.source() ?: error("The add-on returned an empty response.")
+            body.request(1_000_001)
+            require(body.buffer.size <= 1_000_000) { "The add-on response is too large." }
+            return JsonParser.parseString(body.readUtf8()).asJsonObject
         }
     }
 
