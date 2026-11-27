@@ -127,6 +127,7 @@ class PlayerActivity : ComponentActivity() {
     private fun retrySelectedServer(index: Int) {
         refreshedSources = false
         rejectedSource = null
+        rejectedLinks.clear()
         attemptedServers.clear()
         tryServer(index)
     }
@@ -518,13 +519,17 @@ class PlayerActivity : ComponentActivity() {
         }
     }
     private var rejectedSource: String? = null
+    private val rejectedLinks = mutableSetOf<Pair<String, Map<String, String>>>()
     private fun serverFailed(generation: Int, forbidden: Boolean = false) {
         if (generation != connectionGeneration) return
         timeoutJob?.cancel()
         // Invalidate callbacks from this failed player before releasing it.
         val failedGeneration = ++connectionGeneration
         failedSource = servers.getOrNull(serverIndex)?.name
-        if (forbidden) rejectedSource = failedSource
+        if (forbidden) {
+            rejectedSource = failedSource
+            rejectedLinks.add(playback.stream.url to playback.stream.headers)
+        }
         exo?.let {
             if (reachedReady) {
                 resumePosition = it.currentPosition
@@ -551,10 +556,11 @@ class PlayerActivity : ComponentActivity() {
                     catch (_: Exception) { emptyList() }
                     if (failedGeneration != connectionGeneration) return@launch
                     refreshingSources = false
-                    if (fresh.isEmpty()) {
+                    val usable = fresh.filterNot { (it.url to it.headers) in rejectedLinks }
+                    if (usable.isEmpty()) {
                         showSourceFailure()
                     } else {
-                        servers = fresh
+                        servers = usable
                         attemptedServers.clear()
                         tryServer(0)
                     }
@@ -805,7 +811,7 @@ class PlayerActivity : ComponentActivity() {
                 }
                 connectionGeneration++; connectionJob?.cancel(); timeoutJob?.cancel()
                 save(); releasePlayer()
-                servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear(); refreshedSources = false
+                servers = streams.distinctBy { it.url to it.headers }; serverIndex = 0; attemptedServers.clear(); refreshedSources = false; rejectedLinks.clear(); rejectedSource = null
                 playback = Playback(playback.title, servers.first(), target.first, target.second, servers)
                 resumePosition = 0; resumePlay = true; position = 0; duration = 0; finished = false; introSkipped = false; focusIntroAction = false; focusPlayerAction = false
                 autoplayDismissed = false

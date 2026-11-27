@@ -16,11 +16,11 @@ class VixsrcStreamProvider(
     private val allowHttpForTests: Boolean = false
 ) : StreamProvider {
     private val userAgent = "Mozilla/5.0"
-    private fun fetch(url: String, referer: String): String {
+    private fun fetch(url: String, referer: String, stage: String): String {
         val request = Request.Builder().url(url).header("User-Agent", userAgent)
             .header("Referer", referer).cacheControl(CacheControl.Builder().noCache().build()).build()
         client.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Vixsrc returned HTTP ${response.code}. Try another server." }
+            check(response.isSuccessful) { "Vixsrc refused the $stage request (HTTP ${response.code}). Try another source." }
             val body = response.body ?: error("Vixsrc returned an empty response.")
             // Bound the response before parsing pages or playlists.
             val source = body.source()
@@ -40,16 +40,16 @@ class VixsrcStreamProvider(
             "api/tv/${request.id}/${request.season}/${request.episode}"
         }
         val apiUrl = base.resolve(path)!!.toString()
-        val json = JsonParser.parseString(fetch(apiUrl, base.toString())).asJsonObject
+        val json = JsonParser.parseString(fetch(apiUrl, base.toString(), "title lookup")).asJsonObject
         val src = json.get("src")?.takeUnless { it.isJsonNull }?.asString ?: error("Vixsrc has no player for this title.")
         val embed = base.resolve(src) ?: error("Vixsrc returned an invalid player URL.")
         require(embed.host == base.host && embed.scheme == base.scheme && embed.username.isEmpty() && embed.password.isEmpty()) {
             "Vixsrc returned an unexpected player address."
         }
-        val html = fetch(embed.toString(), base.toString())
+        val html = fetch(embed.toString(), base.toString(), "player lookup")
         val stream = extractVixsrcPlaylist(html, userAgent, base.toString())
             ?: error("Vixsrc has no playable playlist for this title.")
-        val playlist = fetch(stream.url, base.toString())
+        val playlist = fetch(stream.url, base.toString(), "video playlist")
         check(playlist.trimStart('\uFEFF', ' ', '\n', '\r', '\t').startsWith("#EXTM3U")) {
             "Vixsrc returned an invalid video playlist."
         }
