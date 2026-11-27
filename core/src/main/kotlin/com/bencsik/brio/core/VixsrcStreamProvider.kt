@@ -47,9 +47,10 @@ class VixsrcStreamProvider(
             "Vixsrc returned an unexpected player address."
         }
         val html = fetch(embed.toString(), base.toString(), "player lookup")
-        val stream = extractVixsrcPlaylist(html, userAgent, base.toString())
+        val playerReferer = embed.newBuilder().query(null).fragment(null).build().toString()
+        val stream = extractVixsrcPlaylist(html, userAgent, playerReferer)
             ?: error("Vixsrc has no playable playlist for this title.")
-        val playlist = fetch(stream.url, base.toString(), "video playlist")
+        val playlist = fetch(stream.url, playerReferer, "video playlist")
         check(playlist.trimStart('\uFEFF', ' ', '\n', '\r', '\t').startsWith("#EXTM3U")) {
             "Vixsrc returned an invalid video playlist."
         }
@@ -69,6 +70,6 @@ internal fun extractVixsrcPlaylist(html: String, userAgent: String, referer: Str
     val token = field("token") ?: return null
     val expires = field("expires") ?: return null
     val playlist = url.newBuilder().setQueryParameter("token", token).setQueryParameter("expires", expires)
-        .setQueryParameter("h", "1").setQueryParameter("lang", "en").build()
+        .apply { if (url.queryParameter("h") == null) addQueryParameter("h", "1") }.build()
     return Stream(playlist.toString(), "Vixsrc", "Auto", mapOf("Referer" to referer, "User-Agent" to userAgent), mimeType = "application/x-mpegURL")
 }

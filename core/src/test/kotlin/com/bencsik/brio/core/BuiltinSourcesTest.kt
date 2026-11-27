@@ -25,7 +25,8 @@ class BuiltinSourcesTest {
         val url = stream.url.toHttpUrl()
         assertEquals("1", url.queryParameter("b"))
         assertEquals("a+b&c", url.queryParameter("token"))
-        assertEquals("en", url.queryParameter("lang"))
+        assertNull(url.queryParameter("lang"))
+        assertEquals("1", url.queryParameter("h"))
         assertEquals("test-agent", stream.headers["User-Agent"])
         assertEquals("application/x-mpegURL", stream.mimeType)
     }
@@ -51,7 +52,8 @@ class BuiltinSourcesTest {
         assertEquals("/api/tv/1399/1/2", requests[0].url.encodedPath)
         assertEquals("/embed/42", requests[1].url.encodedPath)
         assertEquals("/playlist/42", requests[2].url.encodedPath)
-        assertEquals("https://provider.example/", requests[2].header("Referer"))
+        assertEquals("https://provider.example/embed/42", requests[2].header("Referer"))
+        assertEquals(requests[2].header("Referer"), streams.single().headers["Referer"])
         assertEquals("no-cache", requests[0].header("Cache-Control"))
         assertNull(requests[0].header("Authorization"))
     }

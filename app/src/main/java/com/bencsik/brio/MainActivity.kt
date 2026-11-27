@@ -956,7 +956,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.21 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.22 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {
