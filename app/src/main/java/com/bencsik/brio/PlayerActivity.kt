@@ -41,6 +41,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.ExoPlayer
@@ -125,6 +126,7 @@ class PlayerActivity : ComponentActivity() {
     }
     private fun retrySelectedServer(index: Int) {
         refreshedSources = false
+        rejectedSource = null
         attemptedServers.clear()
         tryServer(index)
     }
@@ -515,12 +517,14 @@ class PlayerActivity : ComponentActivity() {
             if (generation == connectionGeneration) serverFailed(generation)
         }
     }
-    private fun serverFailed(generation: Int) {
+    private var rejectedSource: String? = null
+    private fun serverFailed(generation: Int, forbidden: Boolean = false) {
         if (generation != connectionGeneration) return
         timeoutJob?.cancel()
         // Invalidate callbacks from this failed player before releasing it.
         val failedGeneration = ++connectionGeneration
         failedSource = servers.getOrNull(serverIndex)?.name
+        if (forbidden) rejectedSource = failedSource
         exo?.let {
             if (reachedReady) {
                 resumePosition = it.currentPosition
@@ -560,7 +564,7 @@ class PlayerActivity : ComponentActivity() {
         }
         connecting = true
         connectionJob = lifecycleScope.launch {
-            for (seconds in 3 downTo 1) {
+            for (seconds in (if (forbidden) 0 else 3) downTo 1) {
                 countdown = seconds
                 delay(1000)
             }
@@ -571,7 +575,8 @@ class PlayerActivity : ComponentActivity() {
         connecting = false
         refreshingSources = false
         countdown = 0
-        error = "${failedSource ?: "The source"} couldn’t play this video. Retry or choose a server to resume at your last position."
+        error = rejectedSource?.let { "$it denied playback (HTTP 403), and no backup could play. Try another source or add one in Settings → Sources." }
+            ?: "${failedSource ?: "The source"} couldn’t play this video. Retry or choose a server to resume at your last position."
     }
     private fun attachPlayer(generation: Int) {
         val stream = playback.stream
@@ -600,7 +605,12 @@ class PlayerActivity : ComponentActivity() {
             setHandleAudioBecomingNoisy(true)
             addListener(object : Player.Listener {
                 override fun onTracksChanged(newTracks: Tracks) { tracks = newTracks }
-                override fun onPlayerError(playbackError: PlaybackException) { serverFailed(generation) }
+                override fun onPlayerError(playbackError: PlaybackException) {
+                    val forbidden = generateSequence<Throwable>(playbackError) { it.cause }
+                        .take(10).filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+                        .any { it.responseCode == 403 }
+                    serverFailed(generation, forbidden)
+                }
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (generation != connectionGeneration) return
                     finished = playbackState == Player.STATE_ENDED
@@ -610,6 +620,7 @@ class PlayerActivity : ComponentActivity() {
                             timeoutJob?.cancel(); connecting = false; countdown = 0; failedSource = null
                             if (playbackState == Player.STATE_READY) {
                                 reachedReady = true
+                                rejectedSource = null
                                 if (!pipMode) revealControls()
                             }
                             if (playbackState == Player.STATE_ENDED) {

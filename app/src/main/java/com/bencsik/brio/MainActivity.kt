@@ -43,6 +43,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -74,7 +75,7 @@ private val Night = Color(0xFF080D15)
 private val Slate = Color(0xFF1B222D)
 private val Muted = Color(0xFF9DA7B5)
 private val Gold = Color(0xFFFFC44D)
-private data class PosterFocus(val target: String?, val record: (String?) -> Unit)
+private data class PosterFocus(val target: String?, val record: (String?) -> Unit, val posters: MutableSet<FocusRequester>)
 private val LocalPosterFocus = compositionLocalOf<PosterFocus?> { null }
 private val Tabs = listOf("Home", "Movies", "TV Shows", "My List", "Settings")
 
@@ -172,6 +173,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
     var query by rememberSaveable { mutableStateOf("") }
     var showLink by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val posterTargets = remember { linkedSetOf<FocusRequester>() }
     val browseState = rememberSaveableStateHolder()
     var focusedPoster by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -219,7 +221,9 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
             }
         }) { padding ->
         Row(Modifier.fillMaxSize().padding(padding)) {
-            if (tv) TvNavigationRail(tab, categoryParent, ::navigate)
+            if (tv) TvNavigationRail(tab, categoryParent, ::navigate) {
+                posterTargets.toList().any { it.requestFocus() }
+            }
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val wide = maxWidth > 600.dp
             val compact = tv || maxHeight < 580.dp
@@ -256,7 +260,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
                         if (state.selected != null) Box(Modifier.padding(horizontal = 16.dp)) {
                             DetailsScreen(state, vm, wide, compact, play) { showLink = true }
                         } else browseState.SaveableStateProvider(tab) {
-                            CompositionLocalProvider(LocalPosterFocus provides PosterFocus(focusedPoster) { focusedPoster = it }) {
+                            CompositionLocalProvider(LocalPosterFocus provides PosterFocus(focusedPoster, { focusedPoster = it }, posterTargets)) {
                             when {
                             tab == "Home" -> HomeScreen(state, wide, compact, vm.store.showContinueOnHome, vm::select, { vm.watch(it, play) }, play, { navigate("Continue") }) { label, shelfKind, genre ->
                                 kind = shelfKind; categoryLabel = label; categoryGenre = genre; categoryParent = "Home"
@@ -294,7 +298,7 @@ private fun BrioApp(vm: BrioViewModel, tv: Boolean, sharedLink: String, clearSha
 }
 
 @Composable
-private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (String) -> Unit) {
+private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (String) -> Unit, focusContent: () -> Boolean) {
     val initialFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { initialFocus.requestFocus() }
     val narrow = LocalConfiguration.current.screenWidthDp < 760
@@ -309,6 +313,11 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     )
     Column(
         Modifier.width(if (narrow) 120.dp else 156.dp).fillMaxHeight()
+            .onPreviewKeyEvent { event ->
+                val key = event.nativeKeyEvent
+                key.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT &&
+                    key.action == android.view.KeyEvent.ACTION_DOWN && focusContent()
+            }
             .background(Color(0xFF10151E)).verticalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -543,6 +552,11 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     val restore = LocalPosterFocus.current
     val requester = remember { FocusRequester() }
     val posterKey = if (tv) rememberSaveable(item.key) { java.util.UUID.randomUUID().toString() } else null
+    DisposableEffect(restore?.posters, requester, tv) {
+        val targets = restore?.posters
+        if (tv) targets?.add(requester)
+        onDispose { targets?.remove(requester) }
+    }
     LaunchedEffect(restore?.target, posterKey) {
         if (posterKey != null && restore != null && restore.target == posterKey) {
             requester.requestFocus()
@@ -678,13 +692,12 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
             item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(details.seasons) { season -> NavButton(season.name, state.season == season.number) { vm.chooseSeason(season.number) } } } }
             items(state.episodes, key = { it.number }) { episode ->
                 val watched = "${item.key}:${state.season ?: 0}:${episode.number}" in state.watchedEpisodes
-                Column {
-                    OutlinedButton(onClick = { vm.chooseEpisode(episode.number) }, modifier = Modifier.fillMaxWidth().focusRing(),
-                        border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
-                        Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = { state.season?.let { vm.setWatched(item, it, episode.number, !watched) } },
-                        modifier = Modifier.focusRing()) { Text(if (watched) "Mark unwatched" else "Mark watched") }
+                OutlinedButton(onClick = {
+                    vm.chooseEpisode(episode.number)
+                    vm.findSources(play)
+                }, enabled = !state.resolving, modifier = Modifier.fillMaxWidth().focusRing(),
+                    border = BorderStroke(1.dp, if (state.episode == episode.number) Lime else Slate)) {
+                    Text("${if (watched) "✓ " else ""}${episode.number}. ${episode.name}", modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -943,7 +956,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.19 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.20 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {
