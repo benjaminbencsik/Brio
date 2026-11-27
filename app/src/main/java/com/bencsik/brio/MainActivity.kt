@@ -749,9 +749,6 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
     var sourceNotice by remember { mutableStateOf("") }
     var sourceError by remember { mutableStateOf<String?>(null) }
     var debrid by remember { mutableStateOf(vm.store.debridToken) }
-    var jellyfinAddress by remember { mutableStateOf(vm.store.jellyfinAddress) }
-    var jellyfinKey by remember { mutableStateOf(vm.store.jellyfinKey) }
-    var jellyfinStatus by remember { mutableStateOf("") }
     val layoutPrefs = remember(context) { context.getSharedPreferences(LayoutPrefs, Context.MODE_PRIVATE) }
     val layoutMode = layoutPrefs.getString("mode", "Auto") ?: "Auto"
     var section by rememberSaveable { mutableStateOf("Experience") }
@@ -883,29 +880,9 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
             TextButton(onClick = { debrid = ""; vm.store.debridToken = ""; vm.saveSettings(tmdb, provider, "") }, modifier = Modifier.focusRing()) { Text("Disconnect Real-Debrid") }
         }
         item { HorizontalDivider(color = Slate) }
-        item { SectionTitle("Playback sources", "Brio checks its built-in source, your Jellyfin library, and the sources you add, then shows available videos together.") }
+        item { SectionTitle("Playback sources", "Brio checks its built-in source and the sources you add, then shows available videos together.") }
         item { SettingsPanel("Built-in source", "Vixsrc · always checked during playback") {
             Text("Availability varies by title and network. Other sources can still appear when this one fails.", color = Muted)
-        } }
-        item { SettingsPanel("Jellyfin library", "Use matching movies and episodes from your own Jellyfin server as playback sources.") {
-            OutlinedTextField(jellyfinAddress, { jellyfinAddress = it }, label = { Text("Jellyfin HTTPS address") },
-                modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true)
-            OutlinedTextField(jellyfinKey, { jellyfinKey = it }, label = { Text("Jellyfin API key") },
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().focusRing(), singleLine = true)
-            Text("Use a key created for Brio. Your library must have matching TMDB or IMDb metadata.", color = Muted)
-            Button(onClick = {
-                jellyfinStatus = runCatching { vm.store.configureJellyfin(jellyfinAddress, jellyfinKey) }
-                    .fold({ "Jellyfin settings saved." }, { it.message ?: "Could not save Jellyfin settings." })
-            }, enabled = jellyfinAddress.isNotBlank() && jellyfinKey.isNotBlank(), modifier = Modifier.focusRing()) {
-                Text("Save Jellyfin source")
-            }
-            if (vm.store.jellyfinAddress.isNotBlank() || jellyfinAddress.isNotBlank() || jellyfinKey.isNotBlank()) {
-                TextButton(onClick = {
-                    vm.store.configureJellyfin("", "")
-                    jellyfinAddress = ""; jellyfinKey = ""; jellyfinStatus = "Jellyfin removed."
-                }, modifier = Modifier.focusRing()) { Text("Remove Jellyfin source") }
-            }
-            if (jellyfinStatus.isNotBlank()) Text(jellyfinStatus, color = Muted)
         } }
         item { SettingsPanel("Streaming add-ons", "Combine up to six Nuvio Streams or Stremio manifest URLs, or Brio JSON endpoints. First in the list plays first when it has a link.") {
             val entries = provider.lines().map(String::trim).filter(String::isNotBlank)
@@ -956,7 +933,7 @@ private fun TvNavigationRail(tab: String, categoryParent: String, navigate: (Str
                 style = MaterialTheme.typography.bodySmall)
         } }
         if (section == "About") item {
-            Text("Brio 0.5.22 · Made for your next great watch", color = Muted)
+            Text("Brio 0.5.23 · Made for your next great watch", color = Muted)
             SettingsPanel("App updates", "Check GitHub for a newer APK and install it directly on this device.") {
                 Button(onClick = {
                     scope.launch {

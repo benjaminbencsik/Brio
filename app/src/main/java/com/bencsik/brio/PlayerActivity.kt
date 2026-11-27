@@ -549,7 +549,7 @@ class PlayerActivity : ComponentActivity() {
                 connectionJob = lifecycleScope.launch {
                     val fresh = try {
                         withTimeout(30_000) {
-                            store.resolveSources(StreamRequest(title.id, title.kind, playback.season, playback.episode, title.imdbId), title.name)
+                            store.resolveSources(StreamRequest(title.id, title.kind, playback.season, playback.episode, title.imdbId))
                         }
                     } catch (_: kotlinx.coroutines.TimeoutCancellationException) { emptyList() }
                     catch (e: CancellationException) { throw e }
@@ -804,7 +804,7 @@ class PlayerActivity : ComponentActivity() {
         loadingNext = true; nextLoading = true
         lifecycleScope.launch {
             try {
-                val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId), playback.title.name)
+                val streams = store.resolveSources(StreamRequest(playback.title.id, "tv", target.first, target.second, playback.title.imdbId))
                 check(streams.isNotEmpty()) {
                     if (fromPicker) "No video source was found for Season ${target.first}, Episode ${target.second}. Choose another episode or source."
                     else "No streams are available for the next episode. Return to the catalog to choose another source."
