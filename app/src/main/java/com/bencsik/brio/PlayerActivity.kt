@@ -472,6 +472,21 @@ class PlayerActivity : ComponentActivity() {
     }
     @android.annotation.SuppressLint("SetJavaScriptEnabled")
     @Composable private fun ProviderPlayer(page: String) {
+        var loading by remember(page) { mutableStateOf(true) }
+        var showBrowserHint by remember(page) { mutableStateOf(false) }
+        val openBrowser: () -> Unit = {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(page))
+                .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+            try { startActivity(intent) }
+            catch (_: android.content.ActivityNotFoundException) {
+                Toast.makeText(this, "No browser is installed on this device.", Toast.LENGTH_LONG).show()
+            }
+        }
+        LaunchedEffect(page) {
+            delay(8000)
+            loading = false
+            showBrowserHint = true
+        }
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { context ->
                 WebView(context).apply {
@@ -492,6 +507,9 @@ class PlayerActivity : ComponentActivity() {
                                 request.url.host != "vixsrc.to" || request.url.path?.trimEnd('/') !=
                                 android.net.Uri.parse(page).path?.trimEnd('/')
                         }
+                        override fun onPageFinished(view: WebView, url: String) {
+                            loading = false
+                        }
                         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                             if (request.isForMainFrame) webFailure = true
                         }
@@ -510,10 +528,19 @@ class PlayerActivity : ComponentActivity() {
             TextButton(onClick = { finish() }, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().focusRing()) {
                 Text("← Back", color = Color.White)
             }
+            TextButton(onClick = openBrowser, modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                .background(Color.Black.copy(alpha = 0.75f)).focusRing()) { Text("Open in browser", color = Color.White) }
+            if (loading && !webFailure) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (showBrowserHint && !webFailure) {
+                Text("Blank player? Choose Open in browser.", color = Color.White,
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                        .background(Color.Black.copy(alpha = 0.75f)).padding(12.dp))
+            }
             if (webFailure) AlertDialog(onDismissRequest = { finish() },
                 title = { Text("Web player unavailable") },
-                text = { Text("The Vixsrc web player did not load on this device.") },
-                confirmButton = { TextButton(onClick = { finish() }) { Text("Back") } })
+                text = { Text("The Vixsrc web player did not load inside Brio.") },
+                confirmButton = { TextButton(onClick = { webFailure = false; openBrowser() }) { Text("Open in browser") } },
+                dismissButton = { TextButton(onClick = { finish() }) { Text("Back") } })
         }
     }
     override fun onPictureInPictureModeChanged(inPictureInPictureMode: Boolean, newConfig: Configuration) {
